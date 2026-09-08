@@ -1,5 +1,5 @@
 import { connectStream } from "./eventStream.js";
-import { ArticleStore } from "./articleStore.js";
+import { ArticleStore, RANGE_STEPS, MODE_STEPS, FILTER_STEPS } from "./articleStore.js";
 import { Renderer } from "./renderer.js";
 
 const canvas = document.getElementById("field");
@@ -14,15 +14,33 @@ const dom = {
   liveLabel: document.getElementById("live-label"),
   gainValue: document.getElementById("gain-value"),
   gainFill: document.getElementById("gain-fill"),
+  rangeCtrl: document.getElementById("range-ctrl"),
+  rangeValue: document.getElementById("range-value"),
+  rangeFill: document.getElementById("range-fill"),
+  modeCtrl: document.getElementById("mode-ctrl"),
+  modeValue: document.getElementById("mode-value"),
+  modeFill: document.getElementById("mode-fill"),
+  filterCtrl: document.getElementById("filter-ctrl"),
+  filterValue: document.getElementById("filter-value"),
+  filterFill: document.getElementById("filter-fill"),
   nodeCount: document.getElementById("node-count"),
   nodeFill: document.getElementById("node-fill"),
+  linksCount: document.getElementById("links-count"),
+  linksFill: document.getElementById("links-fill"),
   epsValue: document.getElementById("eps-value"),
   epsFill: document.getElementById("eps-fill"),
+  elapsedValue: document.getElementById("elapsed-value"),
 };
 
+function flash(el) {
+  el.classList.remove("is-changed");
+  void el.offsetWidth; // force reflow so the animation restarts on repeat triggers
+  el.classList.add("is-changed");
+}
+
 // ---------------------------------------------------------------------
-// GAIN — the one scroll-wheel-controlled instrument parameter for v1.
-// Governs how strongly each incoming edit affects the field.
+// GAIN — continuous, scroll-over-the-field. Governs how strongly each
+// incoming edit affects the field.
 // ---------------------------------------------------------------------
 let gain = 50; // 0–100, 50 = unity
 
@@ -42,6 +60,81 @@ fieldWrap.addEventListener(
   },
   { passive: false }
 );
+
+// ---------------------------------------------------------------------
+// RANGE / MODE / FILTER — discrete instrument controls. Each responds to
+// both a click (step forward, like a selector button) and a scroll while
+// hovered (step forward/back), so the interaction language stays
+// consistent with GAIN without competing for the same gesture.
+// ---------------------------------------------------------------------
+function setRange(index) {
+  store.setRangeIndex(index);
+  const step = RANGE_STEPS[store.rangeIndex];
+  dom.rangeValue.textContent = step.label;
+  dom.rangeFill.style.width = `${((store.rangeIndex + 1) / RANGE_STEPS.length) * 100}%`;
+  flash(dom.rangeValue);
+}
+setRange(store.rangeIndex);
+
+function cycleMode(dir) {
+  const i = MODE_STEPS.indexOf(store.mode);
+  const next = MODE_STEPS[(i + dir + MODE_STEPS.length) % MODE_STEPS.length];
+  store.setMode(next);
+  dom.modeValue.textContent = next;
+  dom.modeFill.style.width = `${((MODE_STEPS.indexOf(next) + 1) / MODE_STEPS.length) * 100}%`;
+  flash(dom.modeValue);
+}
+
+function cycleFilter(dir) {
+  const i = FILTER_STEPS.indexOf(store.filter);
+  const next = FILTER_STEPS[(i + dir + FILTER_STEPS.length) % FILTER_STEPS.length];
+  store.setFilter(next);
+  dom.filterValue.textContent = next;
+  dom.filterFill.style.width = `${((FILTER_STEPS.indexOf(next) + 1) / FILTER_STEPS.length) * 100}%`;
+  flash(dom.filterValue);
+}
+
+dom.rangeCtrl.addEventListener("click", () => setRange(store.rangeIndex + 1));
+dom.rangeCtrl.addEventListener(
+  "wheel",
+  (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setRange(store.rangeIndex + (e.deltaY > 0 ? -1 : 1));
+  },
+  { passive: false }
+);
+dom.rangeCtrl.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" || e.key === " ") setRange(store.rangeIndex + 1);
+});
+
+dom.modeCtrl.addEventListener("click", () => cycleMode(1));
+dom.modeCtrl.addEventListener(
+  "wheel",
+  (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    cycleMode(e.deltaY > 0 ? -1 : 1);
+  },
+  { passive: false }
+);
+dom.modeCtrl.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" || e.key === " ") cycleMode(1);
+});
+
+dom.filterCtrl.addEventListener("click", () => cycleFilter(1));
+dom.filterCtrl.addEventListener(
+  "wheel",
+  (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    cycleFilter(e.deltaY > 0 ? -1 : 1);
+  },
+  { passive: false }
+);
+dom.filterCtrl.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" || e.key === " ") cycleFilter(1);
+});
 
 // ---------------------------------------------------------------------
 // Canvas sizing
@@ -119,9 +212,18 @@ function frame(now) {
   dom.nodeCount.textContent = String(count).padStart(3, "0");
   dom.nodeFill.style.width = `${Math.min(100, (count / 60) * 100)}%`;
 
+  const linkCount = store.getLinks().length;
+  dom.linksCount.textContent = String(linkCount).padStart(3, "0");
+  dom.linksFill.style.width = `${Math.min(100, (linkCount / 30) * 100)}%`;
+
   const eps = store.getEditsPerSecond();
   dom.epsValue.textContent = eps.toFixed(1);
   dom.epsFill.style.width = `${Math.min(100, (eps / 15) * 100)}%`;
+
+  const elapsed = Math.floor(store.getElapsedSeconds());
+  const mm = String(Math.floor(elapsed / 60)).padStart(2, "0");
+  const ss = String(elapsed % 60).padStart(2, "0");
+  dom.elapsedValue.textContent = `${mm}:${ss}`;
 
   requestAnimationFrame(frame);
 }

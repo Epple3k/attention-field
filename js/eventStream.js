@@ -39,6 +39,7 @@ export function connectStream({ onEdit, onOpen, onError }) {
       user: change.user,
       timestamp: (change.timestamp || Date.now() / 1000) * 1000,
       isNew: change.type === "new",
+      minor: !!change.minor,
       lengthDelta: change.length
         ? (change.length.new || 0) - (change.length.old || 0)
         : 0,

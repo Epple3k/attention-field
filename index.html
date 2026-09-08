@@ -28,29 +28,29 @@
 
   <main class="field-wrap">
     <canvas id="field"></canvas>
-    <div class="field__caption">LIVE DATA FIELD — EN.WIKIPEDIA.ORG</div>
+    <div class="field__caption">LIVE DATA FIELD — EN.WIKIPEDIA.ORG<br /><span class="field__caption-sub">LINES — SAME EDITOR, WITHIN 90S</span></div>
   </main>
 
   <footer class="hud hud--bottom">
-    <div class="ctrl">
-      <div class="ctrl__label">RANGE</div>
+    <div class="ctrl ctrl--clickable" id="range-ctrl" tabindex="0" role="button" aria-label="Cycle range">
+      <div class="ctrl__label">RANGE<span class="ctrl__hint">SCROLL</span></div>
       <div class="ctrl__value" id="range-value">15M</div>
-      <div class="ctrl__bar" aria-hidden="true"><div class="ctrl__bar-fill" style="width:35%"></div></div>
+      <div class="ctrl__bar" aria-hidden="true"><div class="ctrl__bar-fill" id="range-fill" style="width:75%"></div></div>
     </div>
     <div class="ctrl ctrl--active">
       <div class="ctrl__label">GAIN<span class="ctrl__hint">SCROLL</span></div>
       <div class="ctrl__value" id="gain-value">050</div>
       <div class="ctrl__bar" aria-hidden="true"><div class="ctrl__bar-fill" id="gain-fill" style="width:50%"></div></div>
     </div>
-    <div class="ctrl">
-      <div class="ctrl__label">MODE</div>
+    <div class="ctrl ctrl--clickable" id="mode-ctrl" tabindex="0" role="button" aria-label="Cycle mode">
+      <div class="ctrl__label">MODE<span class="ctrl__hint">CLICK</span></div>
       <div class="ctrl__value" id="mode-value">ACTIVITY</div>
-      <div class="ctrl__bar" aria-hidden="true"><div class="ctrl__bar-fill" style="width:100%"></div></div>
+      <div class="ctrl__bar" aria-hidden="true"><div class="ctrl__bar-fill" id="mode-fill" style="width:50%"></div></div>
     </div>
-    <div class="ctrl">
-      <div class="ctrl__label">FILTER</div>
+    <div class="ctrl ctrl--clickable" id="filter-ctrl" tabindex="0" role="button" aria-label="Cycle filter">
+      <div class="ctrl__label">FILTER<span class="ctrl__hint">CLICK</span></div>
       <div class="ctrl__value" id="filter-value">ALL</div>
-      <div class="ctrl__bar" aria-hidden="true"><div class="ctrl__bar-fill" style="width:100%"></div></div>
+      <div class="ctrl__bar" aria-hidden="true"><div class="ctrl__bar-fill" id="filter-fill" style="width:25%"></div></div>
     </div>
     <div class="ctrl ctrl--readout">
       <div class="ctrl__label">NODES</div>
@@ -58,9 +58,19 @@
       <div class="ctrl__bar" aria-hidden="true"><div class="ctrl__bar-fill" id="node-fill" style="width:0%"></div></div>
     </div>
     <div class="ctrl ctrl--readout">
+      <div class="ctrl__label">LINKS</div>
+      <div class="ctrl__value" id="links-count">000</div>
+      <div class="ctrl__bar" aria-hidden="true"><div class="ctrl__bar-fill" id="links-fill" style="width:0%"></div></div>
+    </div>
+    <div class="ctrl ctrl--readout">
       <div class="ctrl__label">EDITS/S</div>
       <div class="ctrl__value" id="eps-value">0.0</div>
       <div class="ctrl__bar" aria-hidden="true"><div class="ctrl__bar-fill" id="eps-fill" style="width:0%"></div></div>
+    </div>
+    <div class="ctrl ctrl--readout">
+      <div class="ctrl__label">OBSERVING</div>
+      <div class="ctrl__value" id="elapsed-value">00:00</div>
+      <div class="ctrl__bar" aria-hidden="true"><div class="ctrl__bar-fill" style="width:100%"></div></div>
     </div>
   </footer>
 

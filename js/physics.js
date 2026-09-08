@@ -7,6 +7,7 @@ const HOME_STRENGTH = 0.35;
 const DAMPING = 0.90;
 const JITTER = 5.5;
 const MAX_SPEED = 60;
+const LINK_STRENGTH = 26;
 
 export function stepPhysics(nodes, bounds, dt) {
   const n = nodes.length;
@@ -65,6 +66,31 @@ export function stepPhysics(nodes, bounds, dt) {
     const pad = a.radius + 24;
     a.x = clamp(a.x, bounds.left + pad, bounds.right - pad);
     a.y = clamp(a.y, bounds.top + pad, bounds.bottom - pad);
+  }
+}
+
+/** Nodes linked by a shared recent editor drift gently toward each other
+ * while the link is fresh — the field's stand-in for topic clustering,
+ * grounded in an actual shared-authorship signal rather than inferred
+ * similarity. Force fades to zero as the link ages out. */
+export function applyLinkForces(links, dt) {
+  for (const link of links) {
+    const t = link.age / link.life;
+    if (t >= 1) continue;
+    const a = link.a;
+    const b = link.b;
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const dist = Math.hypot(dx, dy) || 1;
+    const minDist = a.radius + b.radius + 70;
+    if (dist <= minDist) continue;
+    const force = LINK_STRENGTH * (1 - t) * dt;
+    const fx = (dx / dist) * force;
+    const fy = (dy / dist) * force;
+    a.vx += fx;
+    a.vy += fy;
+    b.vx -= fx;
+    b.vy -= fy;
   }
 }
 

@@ -33,7 +33,9 @@ export class Renderer {
 
     const nodes = store.getNodes();
     const rings = store.getRings();
+    const links = store.getLinks();
 
+    for (const link of links) this._drawLink(link);
     for (const ring of rings) this._drawRing(ring);
 
     // sort so larger / hotter nodes paint last (on top)
@@ -77,6 +79,37 @@ export class Renderer {
     ctx.strokeStyle = `rgba(${COLOR_ACCENT}, ${alpha})`;
     ctx.lineWidth = 1.4;
     ctx.stroke();
+    ctx.restore();
+  }
+
+  _drawLink(link) {
+    const { ctx } = this;
+    const { a, b, age, life } = link;
+    const t = age / life;
+    if (t >= 1) return;
+
+    // fades in fast, lingers, fades out — a signal arriving then settling
+    const envelope = t < 0.1 ? t / 0.1 : 1 - (t - 0.1) / 0.9;
+    const alpha = Math.max(0, envelope) * 0.3;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.strokeStyle = `rgba(${COLOR_ACCENT}, ${alpha})`;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // traveling pulse marking the moment of connection
+    const travel = Math.min(1, age / 0.7);
+    if (travel < 1) {
+      const px = a.x + (b.x - a.x) * travel;
+      const py = a.y + (b.y - a.y) * travel;
+      ctx.beginPath();
+      ctx.arc(px, py, 2, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(${COLOR_ACCENT}, ${0.85 * (1 - travel * 0.3)})`;
+      ctx.fill();
+    }
     ctx.restore();
   }
 
