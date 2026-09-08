@@ -3,6 +3,7 @@ import { ArticleStore, RANGE_STEPS, MODE_STEPS, FILTER_STEPS } from "./articleSt
 import { Renderer } from "./renderer.js";
 import { tieKey } from "./geometry.js";
 import { GROUPS } from "./groups.js";
+import { generateClusterInsight } from "./insights.js";
 
 const canvas = document.getElementById("field");
 const fieldWrap = document.querySelector(".field-wrap");
@@ -71,6 +72,9 @@ setGain(gain);
 fieldWrap.addEventListener(
   "wheel",
   (e) => {
+    // a mostly-horizontal gesture here is a view-switch attempt (see the
+    // .views handler below), not a GAIN adjustment — let it bubble
+    if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
     e.preventDefault();
     const delta = e.deltaY > 0 ? -2 : 2;
     setGain(gain + delta);
@@ -152,6 +156,148 @@ dom.filterCtrl.addEventListener(
 dom.filterCtrl.addEventListener("keydown", (e) => {
   if (e.key === "Enter" || e.key === " ") cycleFilter(1);
 });
+
+// ---------------------------------------------------------------------
+// Views — FIELD (the network) and INDEX (the same live data as a text
+// hierarchy). Switched by clicking a tab or a mostly-horizontal scroll
+// gesture anywhere over the views area (a normal vertical scroll inside
+// the Index list is untouched, since only deltaX drives this).
+// ---------------------------------------------------------------------
+const viewsEl = document.getElementById("views");
+const viewEls = { field: document.getElementById("view-field"), index: document.getElementById("view-index") };
+const tabEls = { field: document.getElementById("tab-field"), index: document.getElementById("tab-index") };
+let currentView = "field";
+
+function setView(view) {
+  if (view === currentView) return;
+  currentView = view;
+  for (const key of Object.keys(viewEls)) {
+    viewEls[key].classList.toggle("is-active", key === view);
+    tabEls[key].classList.toggle("is-active", key === view);
+    tabEls[key].setAttribute("aria-selected", String(key === view));
+  }
+  if (view === "index") renderIndex(); // jump straight to fresh content, not last frame's
+}
+
+tabEls.field.addEventListener("click", () => setView("field"));
+tabEls.index.addEventListener("click", () => setView("index"));
+
+let viewSwitchAccum = 0; // debounce: one switch per gesture, not one per wheel event
+viewsEl.addEventListener(
+  "wheel",
+  (e) => {
+    if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return; // vertical — leave it to the child (e.g. Index scroll)
+    const now = performance.now();
+    if (now - viewSwitchAccum < 400) return;
+    viewSwitchAccum = now;
+    setView(e.deltaX > 0 ? "index" : "field");
+  },
+  { passive: true }
+);
+
+// ---------------------------------------------------------------------
+// Index view — the same live nodes/clusters as a text hierarchy: group ->
+// topic cluster -> articles, with a PATTERN ENGINE insight per cluster.
+// Rebuilt periodically (not every frame — this is DOM, not canvas) from
+// main.js's frame loop, and only while the Index tab is actually visible.
+// ---------------------------------------------------------------------
+const indexListEl = document.getElementById("index-list");
+const indexWrapEl = document.querySelector(".index-wrap");
+const GROUP_ORDER = ["SCI_TECH", "GEO_NATURE", "ARTS_CULTURE", "PUBLIC_LIFE", "OTHER"];
+
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+}
+
+function renderIndex() {
+  const nodes = store.getNodes();
+  if (!nodes.length) {
+    indexListEl.innerHTML = `<div class="index-empty">WAITING FOR LIVE ACTIVITY —</div>`;
+    return;
+  }
+
+  const clusters = store.getClusters().filter((c) => c.members.length >= 3);
+  const clusterOfNode = new Map();
+  for (const c of clusters) for (const m of c.members) clusterOfNode.set(m, c);
+
+  const buckets = new Map(GROUP_ORDER.map((k) => [k, { loose: [], clusterMap: new Map() }]));
+  for (const node of nodes) {
+    const bucket = buckets.get(node.group) || buckets.get("OTHER");
+    const cluster = clusterOfNode.get(node);
+    if (cluster) {
+      if (!bucket.clusterMap.has(cluster)) bucket.clusterMap.set(cluster, []);
+      bucket.clusterMap.get(cluster).push(node);
+    } else {
+      bucket.loose.push(node);
+    }
+  }
+
+  const scrollTop = indexWrapEl.scrollTop;
+  let html = "";
+
+  for (const key of GROUP_ORDER) {
+    const bucket = buckets.get(key);
+    const total = bucket.loose.length + [...bucket.clusterMap.values()].reduce((s, arr) => s + arr.length, 0);
+    if (!total) continue;
+    const group = GROUPS[key];
+
+    html += `<div class="index-group">
+      <div class="index-group__header">
+        <span class="index-group__dot" style="background: rgb(${group.color})"></span>
+        <span class="index-group__name">${group.label.toUpperCase()}</span>
+        <span class="index-group__count">${total}</span>
+      </div>`;
+
+    const clusterEntries = [...bucket.clusterMap.entries()].sort((a, b) => b[1].length - a[1].length);
+    for (const [cluster, members] of clusterEntries) {
+      const insight = generateClusterInsight({ ...cluster, members });
+      html += `<div class="index-cluster">
+        <div class="index-cluster__header">
+          <span class="index-cluster__name">${escapeHtml(cluster.label.toUpperCase())}</span>
+          <span class="index-cluster__count">${members.length} ARTICLES</span>
+        </div>
+        <div class="index-insight">${escapeHtml(insight.text)}<span class="index-insight__byline">— ${insight.byline} · ${insight.confidence}</span></div>
+        <ul class="index-articles">${articleRows(members)}</ul>
+      </div>`;
+    }
+
+    if (bucket.loose.length) {
+      html += `<div class="index-cluster">
+        <div class="index-cluster__header">
+          <span class="index-cluster__name">UNGROUPED</span>
+          <span class="index-cluster__count">${bucket.loose.length} ARTICLES</span>
+        </div>
+        <ul class="index-articles">${articleRows(bucket.loose)}</ul>
+      </div>`;
+    }
+
+    html += `</div>`;
+  }
+
+  indexListEl.innerHTML = html || `<div class="index-empty">NOTHING CATEGORIZED YET —</div>`;
+  indexWrapEl.scrollTop = scrollTop;
+}
+
+function articleRows(members) {
+  return members
+    .slice()
+    .sort((a, b) => b.edits - a.edits)
+    .map(
+      (m) =>
+        `<li class="index-article" data-url="${escapeHtml(m.url)}">
+          <span class="index-article__title">${escapeHtml(m.title)}</span>
+          <span class="index-article__meta">${m.edits} ${m.edits === 1 ? "EDIT" : "EDITS"}</span>
+        </li>`
+    )
+    .join("");
+}
+
+indexListEl.addEventListener("click", (e) => {
+  const row = e.target.closest(".index-article");
+  if (row && row.dataset.url) window.open(row.dataset.url, "_blank", "noopener");
+});
+
+let indexRebuildAccum = 0;
 
 // ---------------------------------------------------------------------
 // Canvas sizing
@@ -398,6 +544,14 @@ function frame(now) {
   const mm = String(Math.floor(elapsed / 60)).padStart(2, "0");
   const ss = String(elapsed % 60).padStart(2, "0");
   dom.elapsedValue.textContent = `${mm}:${ss}`;
+
+  // Index is DOM, not canvas — rebuild it on a slow interval, and only
+  // while it's actually the visible view
+  indexRebuildAccum += dt;
+  if (currentView === "index" && indexRebuildAccum > 1.5) {
+    indexRebuildAccum = 0;
+    renderIndex();
+  }
 
   requestAnimationFrame(frame);
 }

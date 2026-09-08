@@ -25,7 +25,8 @@ endpoint from the browser — no backend required.
 
 - **Scroll / trackpad wheel** over the field adjusts **GAIN** — how strongly
   each incoming edit affects the visualization.
-- **Scroll or click** RANGE, MODE, or FILTER in the footer to step through
+- **Scroll or click** RANGE, MODE, or FILTER in the control bar (directly
+  below the header — there's no bottom footer anymore) to step through
   their values, like a selector switch on an instrument.
 - **Hover** a node for its context summary — title plus a plain-language
   explanation, in a large, high-contrast backed panel, not small text
@@ -38,6 +39,10 @@ endpoint from the browser — no backend required.
   the two articles are connected; **click** to pin that focus open.
 - **Hover** a merged cluster shape for a preview of its members; **click**
   to open it into individual nodes.
+- **Click the INDEX tab**, or scroll horizontally over the field (a
+  trackpad two-finger swipe, shift+wheel, or a mouse's tilt-wheel), to
+  switch to the Index — the same live data as a scrollable text hierarchy.
+  See Index view, below.
 
 ### RANGE, MODE, FILTER
 
@@ -72,8 +77,9 @@ neutral warm-white for *static structure*:
   API) and administrative/maintenance categories are filtered out. Any two
   articles that genuinely share a category are connected by a thin neutral
   line and drawn physically toward each other; connected components of 3+
-  articles get a soft halo and a label — the actual shared category name,
-  e.g. `MACHINE LEARNING` — floated over the group. This is the field's real
+  articles get a dashed boundary — a convex hull around their actual current
+  positions, not a glow — plus a label: the actual shared category name,
+  e.g. `MACHINE LEARNING`, floated over the group. This is the field's real
   topic-clustering mechanism: grounded in Wikipedia's own taxonomy, not an
   inferred or invented similarity score.
 - **Event links (orange, transient).** When the same editor touches two
@@ -117,6 +123,23 @@ known to share `Category:Programming languages`-adjacent categories
 converged from an average ~350px spread down to ~30px while collapsed,
 flew back out to ~200px on expand, and re-collapsed correctly on a second
 toggle.
+
+#### No glow, anywhere
+
+Every gradient-based glow — the old ambient field wash, the halo around an
+expanded cluster, the radial bloom around a hot node — has been removed.
+The field is flat color on a plain background now; the only things that
+still change with live activity are hue (blending toward the accent as a
+node heats up), size, and motion. The one thing a removed glow used to do
+that still matters — making an expanded cluster's membership legible once
+its dots have burst apart and could otherwise get lost among unrelated
+nodes — is now handled by an actual geometric boundary: a convex hull
+(`geometry.convexHull`, Andrew's monotone chain) computed from the
+cluster's live member positions every frame, inflated a little past each
+node, and drawn as a thin dashed line. It tracks the real shape of the
+group, however it's scattered, rather than a fixed-size, faded-edge
+territory that only loosely corresponded to where the members actually
+were.
 
 ## Physics
 
@@ -268,30 +291,120 @@ identity and warmth still reads liveness; a legend for the four colors sits
 in the field's bottom-right corner.
 
 The four hues (plus the neutral fallback) were chosen with the `dataviz`
-skill's palette validator run directly against this app's real background
-(`#0a0a09`), not eyeballed. Worth being upfront about a real limit it
-surfaced: because any two node colors can end up next to each other in this
-field (it's a scatter, not a fixed-order bar chart), full colorblind safety
-for *every* pair tops out at 3 hues with this palette — a documented
-property of the underlying 8-hue set, not something reordering fixes. A
-4th hue (the warm red) was kept anyway, accepting one imperfect pair
-(red vs. yellow, ΔE 13 against a 15 target — a near miss, not a collision)
-because text labels remain the reliable disambiguator on hover, and because
-group color here is a supplementary mood cue, not the only way to identify
-a node — unlike a real chart, where it would be.
+skill's palette validator run directly against this app's real background —
+originally dark (`#0a0a09`), re-validated against the current light
+background (`#f7f6f2`) when the field's whole theme flipped (see Visual
+system, below), since the method's lightness bands differ by surface. On
+the light surface all four hues (blue, aqua, yellow, red) clear every hard
+gate for full pairwise separation (worst normal-vision ΔE 20.8 against a 15
+floor) — better than the dark-mode result, which had one near-miss pair.
+Two WARN-tier notes remain, both legal per the method given a relief
+channel: a CVD floor-band pair, and low mark-contrast specifically for aqua
+and yellow as small filled dots — mitigated the same way in both cases, by
+the text label every node already carries on hover or once large/active
+enough. Group color here is a supplementary identity cue, not the only way
+to tell a node apart — unlike a real chart, where it would need to be.
+
+## Visual system
+
+The field runs on a warm-white/near-black palette rather than the reverse —
+chosen so the flat, categorically-colored node dots (see Topic groups)
+read as the brightest, most saturated things on screen, the way colored
+pins pop against a paper map. Every other UI surface (the header, the
+control bar, the Index view) shares the same tokens. The one deliberate
+exception is the hover context panel (node/cluster/tie), which inverts to
+a dark plate with light ink — a common, legible callout convention that
+makes it pop against a busy light field rather than blending into it. Text
+contrast was checked, not assumed: body ink sits at 16.9:1 on the field
+background, secondary ink at 6.0:1, and the accent (used for live-signal
+text like the FOCUS readout) was deliberately darkened during this pass
+from an initial `#d9660a` (3.3:1) to `#b85406` (4.5:1) to clear the normal
+text contrast threshold rather than only the large-text one.
 
 ### Synthesis layer
 
-Three things read the field's current topology back to you, so it's never
+Two things read the field's current topology back to you, so it's never
 just a set of independent, labeled dots:
 
 - **FOCUS**, top-center of the header — the label of whatever cluster
   currently has the most members: a one-line, live "what's going on."
-- **CLUSTERS**, in the footer — how many named topic groups (3+ articles)
-  exist right now.
-- **Ambient field glow** — a very soft background wash whose intensity
-  tracks smoothed edits/second, so the whole canvas visibly breathes with
-  aggregate Wikipedia throughput, not just individual nodes.
+- **CLUSTERS**, in the control bar — how many named topic groups
+  (3+ articles) exist right now.
+
+The deeper version of "read the topology back to you" is the Index view
+and its Pattern Engine, below — going from *what* is clustered to a
+heuristic guess at *why*.
+
+## Index view
+
+A second, full view of the same live data — not a different dataset, the
+same store, presented as a scrollable text hierarchy instead of a physical
+field. Reach it by clicking the **INDEX** tab next to the control bar, or
+by scrolling horizontally anywhere over the field (a trackpad two-finger
+swipe, shift+wheel, or a mouse's horizontal/tilt wheel — checked via the
+wheel event's `deltaX`, so it doesn't compete with GAIN's vertical scroll
+or the Index list's own normal vertical scrolling).
+
+Structure: **topic group → topic cluster → articles**, in that order —
+the same four coarse groups as the field's node coloring, then within each
+group the same specific-category clusters as the field's merged shapes
+(3+ members), then individual articles sorted by edit count, with anything
+not yet in a named cluster listed separately under "Ungrouped." It rebuilds
+from the live store every ~1.5s while visible (DOM writes are far more
+expensive than canvas redraws, so it doesn't run every frame, and it
+doesn't run at all while the Field tab is the one showing), preserves
+scroll position across rebuilds, and clicking any article opens it on
+Wikipedia — the same information as the field, organized for reading
+instead of watching.
+
+### Pattern Engine
+
+Every cluster in the Index gets a short, plain-language paragraph guessing
+at *why* it's active right now — the same job a human analyst does when
+they notice several related pages all being edited at once and go looking
+for a reason. It's a real, from-scratch heuristic (`js/insights.js`),
+attributed in the UI as its own named subsystem ("— PATTERN ENGINE · " plus
+which pattern it matched) rather than folded silently into the rest of the
+app, and it reads signals already sitting in the data that nothing else in
+this app was using:
+
+- **Edit summaries.** Every registered edit's comment is kept
+  (`node.recentComments`, bounded). Comments are stripped of MediaWiki
+  markup, tokenized, and a stopword list removes both ordinary English
+  filler and Wikipedia-editing boilerplate ("stub," "redirect," "using,"
+  "wp"). A keyword only counts if it shows up on *more than one article* in
+  the cluster — one editor repeating their own phrase across pages doesn't
+  qualify, which matters for the next point.
+- **How many distinct editors are involved**
+  (`node.recentEditors`), which is what separates two narratives that would
+  otherwise look identical from edit *volume* alone: a shared keyword
+  appearing across several different editors' summaries reads as
+  independent people reacting to the same real event; a shared keyword (or
+  just a lot of edits) concentrated in one or two editors reads as a bulk
+  or template-driven update instead. An earlier version of this engine
+  didn't make that distinction and misread a single bot repeating an
+  identical summary across three pages as "shared event language" — caught
+  by testing the engine against a synthetic bulk-update scenario
+  specifically built to expose it, not live traffic.
+- **Whether a new page just appeared** (`node.everNew`) — often how
+  breaking coverage of something not previously notable enough to have its
+  own article first shows up.
+
+Five scenarios (a shared-keyword event across independent editors, a
+single-editor bulk update, broad independent editing with no shared
+language, a new page plus a shared keyword, and a genuinely sparse
+cluster) were run directly through the engine to confirm each produces a
+distinct, honest read rather than a generic fill-in-the-blank sentence —
+including confirming the "not enough signal yet" case says exactly that
+instead of inventing a pattern. The soccer-transfer-news style example this
+feature was scoped around — several player pages active at once, edit
+summaries repeatedly mentioning transfers and signings — is close to
+verbatim what the engine produces when the same shape of data is fed to it.
+
+This is a heuristic over real data, not a verified fact or a call to any
+external model or service — it says what pattern it matched and lets you
+judge it, the same way the rest of this app prefers a real, inspectable
+signal over an invented one.
 
 ## Architecture
 
@@ -313,24 +426,32 @@ Geometry (js/geometry.js)                 ← shared radius/strength formulas
      ↓                                       the renderer alike
 Groups (js/groups.js)                     ← high-level topic classification
      ↓                                       + validated color palette
-Renderer (js/renderer.js)
+Insights (js/insights.js)                 ← Pattern Engine — heuristic
+     ↓                                       "why is this active" narratives
+Renderer (js/renderer.js)                    from edit summaries + editor spread
      ↓
-main.js — wiring, HUD, input, drag + tie interaction
+main.js — wiring, HUD, input, drag + tie interaction, view switching,
+          Index-view rendering
 ```
 
 Data handling is kept fully separate from rendering. No frameworks — vanilla
-HTML/CSS/JS with a `<canvas>` field.
+HTML/CSS/JS with a `<canvas>` field for the Field view, plain DOM for the
+Index view.
 
 ## Status
 
 Live connection, ~60 concurrent article nodes, pulse-on-edit, decay-when-idle,
-a wheel-controlled GAIN, functional RANGE/MODE/FILTER, real Wikipedia-category
-topic clustering, a damped soft-collision spring/repulsion/centering physics
-model with per-node hover stabilization (see Physics) with draggable nodes
-and interactive association ties (hover for a large, legible explanation
-panel, click to pin), merged/collapsible cluster shapes with real
-burst-and-resettle physics, same-editor event links, high-level topic-group
-color coding with a legend, a synthesis-level FOCUS readout, ambient
-field-energy glow, and the core visual identity are in place. Pageview
-context (for genuine 24h history), trails, sound, and a richer
-article-inspection panel remain planned second-iteration additions.
+a wheel-controlled GAIN, functional RANGE/MODE/FILTER in a compact control
+bar, real Wikipedia-category topic clustering with a live hull boundary
+(no glow anywhere in the app), a damped soft-collision spring/repulsion/
+centering physics model with per-node hover stabilization (see Physics)
+with draggable nodes and interactive association ties (hover for a large,
+legible explanation panel, click to pin), merged/collapsible cluster
+shapes with real burst-and-resettle physics, same-editor event links,
+high-level topic-group color coding with a legend, a synthesis-level FOCUS
+readout, a full second Index view of the same live data as a text
+hierarchy with a from-scratch Pattern Engine generating a "why is this
+active" narrative per cluster, and a light/near-black visual identity
+(re-validated for contrast and colorblind safety on the new surface) are
+in place. Pageview context (for genuine 24h history), trails, sound, and a
+richer article-inspection panel remain planned second-iteration additions.

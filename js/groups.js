@@ -7,22 +7,22 @@
 // legible for colorblind viewers.
 //
 // Color choices: validated with the dataviz skill's CVD/contrast checker
-// against this app's real background (#0a0a09), using its documented dark
-// categorical hues, minus slot 2 (orange) — reserved elsewhere in this app
-// exclusively for "live/hot" signal, so a topic group could never be
-// mistaken for an active pulse. The checker's own finding is that full
-// pairwise (any-two-dots-adjacent) colorblind separation tops out at 3
-// hues for this hue family; a 4th (red) introduces one imperfect pair
-// (red vs. yellow, ΔE 13 vs. a 15 target — a near miss, not a collision).
-// That's accepted here deliberately: this is an ambient field, not a
-// compliance chart, and text labels are the reliable fallback.
+// against this app's real (light) background, using its documented light-
+// mode categorical hues, minus slot 2 (orange) — reserved elsewhere in this
+// app exclusively for "live/hot" signal, so a topic group could never be
+// mistaken for an active pulse. On this light surface all four remaining
+// slots (blue, aqua, yellow, red) clear every hard gate for all-pairs
+// separation (worst normal-vision ΔE 20.8 vs. a 15 floor); the only WARNs
+// are a CVD floor-band pair and low mark-contrast for aqua/yellow, both of
+// which the skill says are legal given a relief channel — text labels,
+// which every node already has on hover or once large/active enough.
 
 export const GROUPS = {
-  SCI_TECH: { label: "Science & Technology", color: "57, 135, 229" }, // #3987e5
-  GEO_NATURE: { label: "Geography & Nature", color: "25, 158, 112" }, // #199e70
-  ARTS_CULTURE: { label: "Arts & Culture", color: "201, 133, 0" }, // #c98500
-  PUBLIC_LIFE: { label: "Politics, Society & Sport", color: "230, 103, 103" }, // #e66767
-  OTHER: { label: "Other", color: "138, 132, 120" }, // neutral — matches COLOR_DIM
+  SCI_TECH: { label: "Science & Technology", color: "42, 120, 214" }, // #2a78d6
+  GEO_NATURE: { label: "Geography & Nature", color: "27, 175, 122" }, // #1baf7a
+  ARTS_CULTURE: { label: "Arts & Culture", color: "237, 161, 0" }, // #eda100
+  PUBLIC_LIFE: { label: "Politics, Society & Sport", color: "227, 73, 72" }, // #e34948
+  OTHER: { label: "Other", color: "90, 88, 82" }, // neutral — matches COLOR_DIM
 };
 
 const RULES = [

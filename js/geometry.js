@@ -33,3 +33,37 @@ export function clamp01(v) {
 export function tieKey(tie) {
   return [tie.a.title, tie.b.title].sort().join("::");
 }
+
+/** Convex hull via Andrew's monotone chain — O(n log n), trivial at the
+ * small n (a handful of cluster members) this is used for. Used to draw a
+ * boundary around an expanded cluster's actual current positions, so its
+ * members read as a group without a glow/gradient doing the work. Returns
+ * points in counter-clockwise order; fewer than 3 unique points come back
+ * as-is (nothing sensible to hull). */
+export function convexHull(points) {
+  const pts = [...new Map(points.map((p) => [`${p.x},${p.y}`, p])).values()].sort(
+    (a, b) => a.x - b.x || a.y - b.y
+  );
+  if (pts.length < 3) return pts;
+
+  const cross = (o, a, b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+
+  const lower = [];
+  for (const p of pts) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) {
+      lower.pop();
+    }
+    lower.push(p);
+  }
+  const upper = [];
+  for (let i = pts.length - 1; i >= 0; i--) {
+    const p = pts[i];
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) {
+      upper.pop();
+    }
+    upper.push(p);
+  }
+  lower.pop();
+  upper.pop();
+  return lower.concat(upper);
+}

@@ -30,16 +30,7 @@
     </div>
   </header>
 
-  <main class="field-wrap">
-    <canvas id="field"></canvas>
-    <div class="field__caption">
-      LIVE DATA FIELD — EN.WIKIPEDIA.ORG<br />
-      <span class="field__caption-sub">NEUTRAL LINES — SHARED CATEGORY · ORANGE PULSE — SAME EDITOR, 90S · SHAPES — MERGED CLUSTERS, CLICK TO OPEN</span>
-    </div>
-    <div class="field__legend" id="group-legend" aria-label="Topic group color key"></div>
-  </main>
-
-  <footer class="hud hud--bottom">
+  <div class="controlbar">
     <div class="ctrl ctrl--clickable" id="range-ctrl" tabindex="0" role="button" aria-label="Cycle range">
       <div class="ctrl__label">RANGE<span class="ctrl__hint">SCROLL</span></div>
       <div class="ctrl__value" id="range-value">15M</div>
@@ -85,7 +76,35 @@
       <div class="ctrl__value" id="elapsed-value">00:00</div>
       <div class="ctrl__bar" aria-hidden="true"><div class="ctrl__bar-fill" style="width:100%"></div></div>
     </div>
-  </footer>
+
+    <div class="view-tabs" role="tablist" aria-label="Switch view">
+      <button class="view-tab is-active" id="tab-field" data-view="field" role="tab" aria-selected="true">FIELD</button>
+      <button class="view-tab" id="tab-index" data-view="index" role="tab" aria-selected="false">INDEX</button>
+    </div>
+  </div>
+
+  <main class="views" id="views">
+    <section class="view view--field is-active" id="view-field">
+      <div class="field-wrap">
+        <canvas id="field"></canvas>
+        <div class="field__caption">
+          LIVE DATA FIELD — EN.WIKIPEDIA.ORG<br />
+          <span class="field__caption-sub">DASHED OUTLINE — EXPANDED CLUSTER BOUNDARY · ORANGE PULSE — SAME EDITOR, 90S · SHAPES — MERGED CLUSTERS, CLICK TO OPEN</span>
+        </div>
+        <div class="field__legend" id="group-legend" aria-label="Topic group color key"></div>
+      </div>
+    </section>
+
+    <section class="view view--index" id="view-index">
+      <div class="index-wrap">
+        <div class="index-header">
+          <div class="index-header__title">TOPIC INDEX</div>
+          <div class="index-header__sub">SAME LIVE DATA, ORGANIZED AS TEXT — SCROLL HORIZONTALLY OR CLICK A TAB TO SWITCH VIEWS</div>
+        </div>
+        <div class="index-list" id="index-list"></div>
+      </div>
+    </section>
+  </main>
 
   <script type="module" src="js/main.js"></script>
 </body>

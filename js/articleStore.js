@@ -266,6 +266,17 @@ export class ArticleStore {
     node.mass = Math.min(1, node.mass + 0.14 * gainFactor);
     node.heat = Math.min(1, node.heat + 0.55 * gainFactor);
     node.history.push(now);
+    if (edit.isNew) node.everNew = true;
+    if (edit.comment) {
+      node.recentComments.push(edit.comment);
+      if (node.recentComments.length > 6) node.recentComments.shift();
+    }
+    node.recentEditors.add(edit.user || "");
+    if (node.recentEditors.size > 12) {
+      // keep it bounded without needing insertion order — drop an
+      // arbitrary member once well past what any insight needs to count
+      node.recentEditors.delete(node.recentEditors.values().next().value);
+    }
 
     this.rings.push({
       node,
@@ -692,6 +703,9 @@ export class ArticleStore {
       radius: BASE_RADIUS,
       opacity: 0.1,
       edits: 0,
+      everNew: !!edit.isNew,
+      recentComments: [],
+      recentEditors: new Set(),
       history: [],
       rangeCount: 0,
       categories: null,

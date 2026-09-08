@@ -3,13 +3,20 @@
 // (read-only) for the short context-summary text to show on hover. No
 // simulation or state-mutation logic lives here.
 
-import { clusterShapeRadius, clusterHaloRadius } from "./geometry.js";
+import { clusterShapeRadius, convexHull } from "./geometry.js";
 import { GROUPS } from "./groups.js";
 
-const COLOR_BG = "#0a0a09";
-const COLOR_FG_RGB = "243, 237, 224";
-const COLOR_ACCENT = "255, 138, 30"; // rgb triplet for accent, used with alpha
-const COLOR_DIM = "138, 132, 120";
+const COLOR_BG = "#f7f6f2";
+const COLOR_FG_RGB = "22, 21, 16"; // near-black ink, on the light field background
+const COLOR_ACCENT = "184, 84, 6"; // rgb triplet for accent, used with alpha — 4.5:1 on the light field bg
+const COLOR_DIM = "96, 94, 87";
+// The hover summary panel is deliberately inverted (dark plate, light ink)
+// rather than matching the field's own light theme — a common, legible
+// callout convention that makes it pop against a busy light field instead
+// of blending in.
+const COLOR_PANEL_BG = "20, 19, 16";
+const COLOR_PANEL_INK = "250, 248, 244";
+const COLOR_PANEL_INK_DIM = "198, 195, 188";
 
 export class Renderer {
   constructor(canvas) {
@@ -44,7 +51,6 @@ export class Renderer {
     const links = store.getLinks();
     const topicLinks = store.getTopicLinks();
     const clusters = store.getClusters();
-    const energy = store.getFieldEnergy();
 
     // members of a collapsed cluster are no longer individually rendered —
     // the merged shape stands in for all of them
@@ -63,9 +69,10 @@ export class Renderer {
     const isFocusNode = (n) => active && (n === active.tie.a || n === active.tie.b);
     const isFocusLink = (l) => active && l === active.tie;
 
-    this._drawAmbientGlow(energy);
+    // an expanded cluster's real boundary (not a glow) — drawn first so
+    // everything else layers on top of it
     for (const cluster of clusters) {
-      if (!cluster.collapsed && cluster.members.length >= 3) this._drawClusterHalo(cluster, dim);
+      if (!cluster.collapsed && cluster.members.length >= 3) this._drawClusterBoundary(cluster, dim);
     }
     for (const tl of topicLinks) {
       if (hidden.has(tl.a) || hidden.has(tl.b)) continue;
@@ -98,22 +105,6 @@ export class Renderer {
     return nodes;
   }
 
-  _drawAmbientGlow(energy) {
-    if (energy < 0.02) return;
-    const { ctx, width, height } = this;
-    const cx = width / 2;
-    const cy = height / 2;
-    const r = Math.max(width, height) * 0.62;
-    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
-    const alpha = Math.min(0.09, energy * 0.11);
-    grad.addColorStop(0, `rgba(${COLOR_ACCENT}, ${alpha})`);
-    grad.addColorStop(1, `rgba(${COLOR_ACCENT}, 0)`);
-    ctx.save();
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, width, height);
-    ctx.restore();
-  }
-
   _clusterCentroid(cluster) {
     const members = cluster.members;
     let cx = 0;
@@ -127,51 +118,71 @@ export class Renderer {
     return { cx, cy };
   }
 
-  // Halo radius is the summary shape's own radius plus a small fixed pad —
-  // not a multiplier over how far apart the (possibly widely expanded)
-  // members happen to be scattered. Keeps it reading as a subtle region
-  // around the node rather than a giant circular territory.
-  _drawClusterHalo(cluster, dim = 1) {
-    if (cluster.members.length < 3) return;
+  // The true extent of an expanded cluster's current scatter — unlike
+  // clusterHaloRadius (a small fixed size tied to the collapsed shape),
+  // this tracks wherever the members actually are, since the boundary
+  // drawn below needs to honestly enclose them, however far apart.
+  _clusterExtent(cluster) {
+    const { cx, cy } = this._clusterCentroid(cluster);
+    let maxR = 40;
+    for (const m of cluster.members) {
+      const d = Math.hypot(m.x - cx, m.y - cy) + m.radius;
+      if (d > maxR) maxR = d;
+    }
+    return { cx, cy, maxR };
+  }
+
+  // A clean, non-glowing boundary around an expanded cluster's actual
+  // member positions (a convex hull, inflated outward a little past each
+  // node), so membership stays legible without a fading halo — the
+  // dots don't just get lost in the rest of the field once they've
+  // burst apart.
+  _drawClusterBoundary(cluster, dim = 1) {
+    const members = cluster.members;
+    if (members.length < 3) return;
     const { ctx } = this;
     const { cx, cy } = this._clusterCentroid(cluster);
-    const r = clusterHaloRadius(cluster.members.length);
-    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
-    grad.addColorStop(0, `rgba(${COLOR_FG_RGB}, ${0.06 * dim})`);
-    grad.addColorStop(1, `rgba(${COLOR_FG_RGB}, 0)`);
+    const hull = convexHull(members.map((m) => ({ x: m.x, y: m.y, r: m.radius })));
+    if (hull.length < 3) return;
+
     ctx.save();
-    ctx.fillStyle = grad;
     ctx.beginPath();
-    ctx.arc(cx, cy, r, 0, Math.PI * 2);
-    ctx.fill();
+    hull.forEach((p, i) => {
+      const dx = p.x - cx;
+      const dy = p.y - cy;
+      const d = Math.hypot(dx, dy) || 1;
+      const pad = (p.r || 8) + 14;
+      const ox = p.x + (dx / d) * pad;
+      const oy = p.y + (dy / d) * pad;
+      if (i === 0) ctx.moveTo(ox, oy);
+      else ctx.lineTo(ox, oy);
+    });
+    ctx.closePath();
+    ctx.strokeStyle = `rgba(${COLOR_FG_RGB}, ${0.22 * dim})`;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 4]);
+    ctx.stroke();
     ctx.restore();
   }
 
   _drawClusterLabel(cluster, dim = 1) {
     if (cluster.members.length < 3) return;
     const { ctx } = this;
-    const { cx, cy } = this._clusterCentroid(cluster);
-    const r = clusterHaloRadius(cluster.members.length);
+    const { cx, cy, maxR } = this._clusterExtent(cluster);
+    const r = maxR + 14;
     const isHover = this.hoverCluster === cluster;
     ctx.save();
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.font = `500 11px "IBM Plex Mono", monospace`;
-    ctx.fillStyle = `rgba(${COLOR_FG_RGB}, ${(isHover ? 0.85 : 0.55) * dim})`;
+    ctx.fillStyle = `rgba(${COLOR_FG_RGB}, ${(isHover ? 0.85 : 0.6) * dim})`;
     ctx.fillText(cluster.label.toUpperCase(), cx, cy - r - 15);
     ctx.font = `400 8px "IBM Plex Mono", monospace`;
-    ctx.fillStyle = `rgba(${COLOR_DIM}, ${0.65 * dim})`;
+    ctx.fillStyle = `rgba(${COLOR_DIM}, ${0.7 * dim})`;
     const hint = cluster.collapsible
       ? `${cluster.members.length} ARTICLES — CLICK TO COLLAPSE`
       : `${cluster.members.length} ARTICLES`;
     ctx.fillText(hint, cx, cy - r - 3);
-    if (isHover && cluster.collapsible) {
-      ctx.beginPath();
-      ctx.arc(cx, cy, r, 0, Math.PI * 2);
-      ctx.strokeStyle = `rgba(${COLOR_ACCENT}, 0.35)`;
-      ctx.lineWidth = 1;
-      ctx.stroke();
-    }
     ctx.restore();
   }
 
@@ -246,8 +257,10 @@ export class Renderer {
   }
 
   _drawClusterSummary(store, cluster) {
-    const { cx, cy } = this._clusterCentroid(cluster);
-    const r = cluster.collapsed ? clusterShapeRadius(cluster.members.length) : clusterHaloRadius(cluster.members.length);
+    const extent = cluster.collapsed
+      ? { ...this._clusterCentroid(cluster), maxR: clusterShapeRadius(cluster.members.length) }
+      : this._clusterExtent(cluster);
+    const { cx, cy, maxR: r } = extent;
     const preview = cluster.members
       .slice(0, 3)
       .map((m) => m.title.toLowerCase())
@@ -298,9 +311,9 @@ export class Renderer {
       meta: `400 11px "IBM Plex Mono", monospace`,
     };
     const color = {
-      title: `rgba(${COLOR_FG_RGB}, 1)`,
-      body: `rgba(${COLOR_FG_RGB}, 0.88)`,
-      meta: `rgba(${COLOR_DIM}, 0.95)`,
+      title: `rgba(${COLOR_PANEL_INK}, 1)`,
+      body: `rgba(${COLOR_PANEL_INK}, 0.9)`,
+      meta: `rgba(${COLOR_PANEL_INK_DIM}, 0.95)`,
     };
 
     // first pass: wrap and measure every line so the backing panel can be
@@ -329,9 +342,9 @@ export class Renderer {
     boxTop = Math.max(8, Math.min(height - boxHeight - 8, boxTop));
     const boxLeft = boxCenterX - boxWidth / 2;
 
-    ctx.fillStyle = "rgba(8, 8, 7, 0.92)";
+    ctx.fillStyle = `rgba(${COLOR_PANEL_BG}, 0.94)`;
     ctx.fillRect(boxLeft, boxTop, boxWidth, boxHeight);
-    ctx.strokeStyle = `rgba(${COLOR_FG_RGB}, 0.16)`;
+    ctx.strokeStyle = `rgba(${COLOR_PANEL_INK}, 0.14)`;
     ctx.lineWidth = 1;
     ctx.strokeRect(boxLeft + 0.5, boxTop + 0.5, boxWidth - 1, boxHeight - 1);
 
@@ -384,7 +397,7 @@ export class Renderer {
   _drawGrid() {
     const { ctx, width, height } = this;
     ctx.save();
-    ctx.strokeStyle = "rgba(255,255,255,0.025)";
+    ctx.strokeStyle = "rgba(0,0,0,0.045)";
     ctx.lineWidth = 1;
     const step = 64;
     for (let x = step; x < width; x += step) {
@@ -464,19 +477,6 @@ export class Renderer {
     const coreRgb = heatT > 0 ? mixRgb(groupRgb, COLOR_ACCENT, heatT) : groupRgb;
 
     ctx.save();
-
-    // glow for hot / large nodes, tinted the same way as the core
-    if (heatGlow > 0.05 || node.radius > 10) {
-      const glowR = node.radius * (2.2 + heatGlow * 1.6);
-      const grad = ctx.createRadialGradient(node.x, node.y, 0, node.x, node.y, glowR);
-      const glowAlpha = Math.min(0.22, heatGlow * 0.28 + node.mass * 0.06) * dim;
-      grad.addColorStop(0, `rgba(${coreRgb}, ${glowAlpha})`);
-      grad.addColorStop(1, `rgba(${coreRgb}, 0)`);
-      ctx.fillStyle = grad;
-      ctx.beginPath();
-      ctx.arc(node.x, node.y, glowR, 0, Math.PI * 2);
-      ctx.fill();
-    }
 
     // core dot
     const opacity = node.opacity * dim;
@@ -558,16 +558,20 @@ export class Renderer {
   }
 
   // Only clusters large enough to be collapsible respond to hover/click —
-  // a bare halo on a 3-member cluster is informational only, not a control.
+  // a bare boundary on a 3-member cluster is informational only, not a
+  // control.
   hitTestCluster(x, y, clusters) {
     let closest = null;
     let closestDist = Infinity;
     for (const cluster of clusters) {
       if (!cluster.collapsible) continue;
-      const { cx, cy } = this._clusterCentroid(cluster);
-      const testR = cluster.collapsed
-        ? clusterShapeRadius(cluster.members.length) + 16
-        : clusterHaloRadius(cluster.members.length);
+      let cx, cy, testR;
+      if (cluster.collapsed) {
+        ({ cx, cy } = this._clusterCentroid(cluster));
+        testR = clusterShapeRadius(cluster.members.length) + 16;
+      } else {
+        ({ cx, cy, maxR: testR } = this._clusterExtent(cluster));
+      }
       const d = Math.hypot(cx - x, cy - y);
       if (d <= testR && d < closestDist) {
         closest = cluster;
@@ -578,14 +582,14 @@ export class Renderer {
   }
 
   // "Click outside to dismiss": true if the point falls within any
-  // currently expanded cluster's boundary (its halo region) — used so a
-  // click elsewhere in the field, but not a click among an expanded
-  // cluster's own members, is what re-collapses it.
+  // currently expanded cluster's boundary — used so a click elsewhere in
+  // the field, but not a click among an expanded cluster's own members,
+  // is what re-collapses it.
   isInsideExpandedCluster(x, y, clusters) {
     for (const cluster of clusters) {
       if (!cluster.expanded) continue;
-      const { cx, cy } = this._clusterCentroid(cluster);
-      if (Math.hypot(cx - x, cy - y) <= clusterHaloRadius(cluster.members.length)) return true;
+      const { cx, cy, maxR } = this._clusterExtent(cluster);
+      if (Math.hypot(cx - x, cy - y) <= maxR) return true;
     }
     return false;
   }
