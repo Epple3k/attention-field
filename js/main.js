@@ -534,10 +534,13 @@ setInterval(updateClock, 1000);
 let lastTime = performance.now();
 let indexReadyCheckAccum = 0;
 
-// Fetches once immediately, then re-checks periodically (refreshCurrentEvents
-// itself no-ops if the cache is still fresh) — a live network lookup, not
-// something to await from the render path.
-refreshCurrentEvents();
+// Delayed slightly rather than fired the instant the page loads — that's
+// the same moment the first batch of brand-new nodes' own category fetches
+// is also starting, and spreading startup requests out instead of piling
+// them all onto Wikipedia at once reduces the odds any of them hit a
+// transient failure. Re-checked periodically after that (refreshCurrentEvents
+// itself no-ops if the cache is still fresh).
+setTimeout(refreshCurrentEvents, 15000);
 let currentEventsCheckAccum = 0;
 
 function frame(now) {

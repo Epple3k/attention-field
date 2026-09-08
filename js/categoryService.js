@@ -33,7 +33,13 @@ export function isNoiseCategory(name) {
 
 const cache = new Map(); // title -> Set<string> (resolved only)
 
-/** Resolves to a Map<title, Set<category>> for every requested title. */
+/** Resolves to a Map<title, Set<category>> — only for titles that actually
+ * resolved. A title that never came back (a failed request, a rate limit,
+ * a dropped connection) is simply absent from the map rather than papered
+ * over with an empty set, so the caller (articleStore.js's
+ * _flushCategoryQueue) can tell "genuinely has no categories" apart from
+ * "the fetch failed" and retry the latter instead of giving up on it
+ * forever. */
 export async function fetchCategoriesBatch(titles) {
   const results = new Map();
   const toFetch = [];
@@ -56,12 +62,9 @@ export async function fetchCategoriesBatch(titles) {
         const set = chunkResult.get(t);
         cache.set(t, set);
         results.set(t, set);
-      } else {
-        // never came back (e.g. the request failed outright) — return an
-        // empty set for this call, but don't cache it, so a title isn't
-        // permanently treated as categoryless just because of one bad request
-        results.set(t, new Set());
       }
+      // else: never came back — left out of both the cache and the
+      // returned map entirely, so the caller knows to retry it
     }
   }
 

@@ -90,7 +90,11 @@ export class ArticleStore {
     this._categoryFetchAccum = 0;
     this._pendingFetch = false;
     this._clusterRecomputeAccum = 0;
-    this._trendingFetchAccum = TRENDING_FETCH_INTERVAL; // fetch once immediately on first tick
+    // staggered rather than firing on the very first tick — that's the same
+    // moment the first batch of brand-new nodes' category fetches also
+    // fires, and piling every startup request onto Wikipedia at once is
+    // exactly when a transient failure does the most damage
+    this._trendingFetchAccum = TRENDING_FETCH_INTERVAL - 20;
     this._pendingTrendingFetch = false;
     this._fieldEnergyEMA = 0;
     this._expandedLabels = new Set(); // clusters the viewer has manually opened
@@ -643,13 +647,29 @@ export class ArticleStore {
       for (const title of titles) {
         const node = this.nodes.get(title);
         if (!node) continue; // decayed away before the lookup returned
-        node.categories = results.get(title) || new Set();
-        node.categoriesLoaded = true;
-        node.group = classifyGroup(node.categories);
+        if (results.has(title)) {
+          node.categories = results.get(title);
+          node.categoriesLoaded = true;
+          node.group = classifyGroup(node.categories);
+        } else {
+          // the fetch failed for this one (rate limit, transient network
+          // error) — requeue it for the next flush cycle rather than
+          // permanently marking it categoryless. No retry cap: a title
+          // that keeps failing is either hitting a passing issue (worth
+          // retrying indefinitely) or a real outage (giving up wouldn't
+          // help either, and would wrongly freeze it out once things
+          // recover) — see categoryService.js's fetchCategoriesBatch.
+          this._categoryQueue.add(title);
+        }
       }
       this._recomputeClusters();
     } catch {
-      // leave affected nodes without categories — they simply won't cluster
+      // the whole request failed outright (e.g. a network error) — requeue
+      // every title in this flush the same way, instead of silently
+      // dropping them
+      for (const title of titles) {
+        if (this.nodes.has(title)) this._categoryQueue.add(title);
+      }
     } finally {
       this._pendingFetch = false;
     }

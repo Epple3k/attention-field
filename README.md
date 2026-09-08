@@ -200,6 +200,41 @@ neutral warm-white for *static structure*:
   connects them — evidence of coordinated behavior (a template rollout,
   someone following a thread across pages) happening right now.
 
+#### A category fetch failure no longer permanently blocks a node
+
+Found from a real report that clustering had stopped happening at all mid-
+session — no new groups, nodes just floating uncategorized, the Index
+staying locked. The cause: a category lookup that fails outright (a
+network blip, a transient Wikimedia rate-limit — this app makes frequent,
+small, unauthenticated requests, so it's not immune to one) used to
+permanently mark that node "loaded, zero categories" with no retry
+(`_flushCategoryQueue` in `js/articleStore.js`), since the map
+`categoryService.js` returned always had *some* entry for every requested
+title, success or failure, so the caller had no way to tell the two apart.
+One bad request meant that specific article could never cluster for the
+rest of the session — and because this can happen to any newly-created
+node at any time, the effect compounds the longer a session runs, exactly
+matching the report.
+
+Fixed at both ends: `fetchCategoriesBatch` now leaves a failed title out of
+its returned map entirely instead of filling in an empty placeholder, and
+`_flushCategoryQueue` requeues anything missing from that map for the next
+flush cycle (`CATEGORY_FETCH_INTERVAL`, 1.5s later) instead of writing it
+off — with no retry cap, deliberately: a title that keeps failing is either
+hitting a passing issue (worth retrying indefinitely) or a real outage
+(giving up wouldn't help either, and would wrongly freeze that node out
+even after things recovered). Verified with a controlled failure-injection
+test (a mocked fetch made to fail on demand, not just observed live
+flakiness): a node whose first fetch fails is confirmed *not*
+categoriesLoaded and is requeued; it recovers with real categories once the
+failure clears; it survives 8 straight synthetic failures still queued
+rather than giving up; and a fetch that throws outright (not just a bad
+HTTP status) is caught and requeued rather than crashing the flush. The two
+new periodic background fetches added alongside this (top-pageviews,
+"In the news") were also nudged to fire ~15–20s after page load instead of
+at the very first tick, so they don't pile onto the same moment the first
+batch of brand-new nodes' own category fetches is also going out.
+
 Both kinds of tie are real interactive targets, not decorative geometry.
 Hovering one thickens it, highlights both endpoint nodes, dims everything
 else in the field to a third of its normal opacity, and shows a plain-
