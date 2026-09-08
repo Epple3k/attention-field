@@ -364,31 +364,6 @@ body {
   transform: scale(1.3);
 }
 
-.view-dot.is-locked {
-  cursor: not-allowed;
-}
-
-.toast {
-  position: fixed;
-  left: 50%;
-  bottom: 40px;
-  transform: translateX(-50%) translateY(6px);
-  z-index: 21;
-  font-size: 9.5px;
-  letter-spacing: 0.1em;
-  color: var(--panel-ink);
-  background: var(--panel-bg);
-  padding: 9px 16px;
-  white-space: nowrap;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.25s ease, transform 0.25s ease;
-}
-
-.toast.is-visible {
-  opacity: 1;
-  transform: translateX(-50%) translateY(0);
-}
 
 /* ---------- Views (Field / Index) — switched with the scroll wheel: over
    the field, any deliberate scroll moves to Index; inside Index, scrolling

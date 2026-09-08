@@ -748,6 +748,13 @@ export class ArticleStore {
       for (const c of n.categories) freq.set(c, (freq.get(c) || 0) + 1);
     }
     const maxFreq = Math.max(1, ...freq.values());
+    // A category held by a big chunk of whatever's currently active isn't a
+    // real connection, just coincidence — two articles both being, say,
+    // "American films" doesn't read as "these are related" the way a rare,
+    // specific category does. Capped at the larger of a flat floor (so a
+    // small, early pool isn't over-filtered) and a fraction of the current
+    // pool (so the bar rises sensibly as more gets active).
+    const tieCommonalityCap = Math.max(4, Math.ceil(nodes.length * 0.35));
 
     const links = [];
     for (let i = 0; i < nodes.length; i++) {
@@ -759,6 +766,7 @@ export class ArticleStore {
         for (const c of a.categories) {
           if (!b.categories.has(c)) continue;
           const score = freq.get(c) || 1;
+          if (score > tieCommonalityCap) continue; // too generic to read as a real connection
           if (score < bestScore) {
             bestScore = score;
             best = c;

@@ -235,6 +235,39 @@ new periodic background fetches added alongside this (top-pageviews,
 at the very first tick, so they don't pile onto the same moment the first
 batch of brand-new nodes' own category fetches is also going out.
 
+#### Cleaning up connections that don't actually mean anything
+
+Two related sources of visual clutter, both surfaced by feedback that the
+field had gotten a little messier since trending (heavily-read) nodes
+joined the same clustering pipeline as edited ones:
+
+- **A tie needs a genuinely specific shared category, not just any shared
+  one.** `_recomputeClusters` already preferred the rarest shared category
+  between two articles, but had no floor — two nodes sharing something held
+  by a big chunk of everything else currently active (e.g. a broad category
+  like "American films") still formed a tie, which reads as an arbitrary
+  line rather than a real connection once trending nodes broadened the mix
+  of categories in play. A category now has to clear a commonality cap —
+  held by no more than the larger of a flat floor or 35% of the current
+  category-bearing pool — to count at all; a genuinely rare, specific
+  shared category still ties two nodes together exactly as before. Verified
+  against both synthetic categories (a category shared by all 10 active
+  nodes is excluded; one shared by only 2 still forms the tie) and real
+  category data (Python and JavaScript still tie via "Cross-platform
+  software" — genuinely narrow — while broader overlaps between unrelated
+  active nodes don't).
+- **A trending node's label no longer shows just because it's big.** A
+  trending node's radius comes from a guaranteed visibility floor (see
+  Heavily-read pages, above), not from being topically connected to
+  anything — so an isolated one used to read as a large, confidently
+  labeled title floating with no tie to anything else nearby, which is
+  exactly what "doesn't make sense" about a floating connector-less label.
+  Its title now only auto-shows once it's actually part of a real
+  cluster (or hovered/focused) — the triangle shape alone still
+  communicates "heavily read" without forcing text onto something that
+  isn't actually tied to anything. Edit-driven nodes are unaffected; this
+  only changes when a *trending* node's label appears.
+
 Both kinds of tie are real interactive targets, not decorative geometry.
 Hovering one thickens it, highlights both endpoint nodes, dims everything
 else in the field to a third of its normal opacity, and shows a plain-
@@ -586,18 +619,26 @@ same store, presented as a scrollable text hierarchy instead of a physical
 field. Reached by scrolling (see Interaction, above) or clicking the
 position dots.
 
-### Locked until there's something to say
+### Available immediately — only the digest waits for real signal
 
-The Index doesn't unlock the moment the page loads — it stays locked
-(the index dot dimmed and inert, a brief toast on a blocked scroll
-attempt: "GATHERING DATA — NOT ENOUGH SIGNAL YET") until at least one
-active topic cluster has produced a genuinely confident Pattern Engine
-read, not just "insufficient signal." In practice that's usually well
-under a minute of live traffic, but the point isn't speed — it's that an
-empty or uninformative Index would undercut the thing the view exists to
-do. This is a one-way latch (`main.js`'s `indexReady`, checked on a slow
-interval since it means recomputing insight text): once real signal has
-shown up once, the view stays unlocked even if things go quiet again.
+The Index used to stay locked (the index dot dimmed and inert, scrolling
+into it blocked with a toast) until a whole confident cluster had formed,
+on the reasoning that an empty Index wasn't worth showing. In practice this
+meant the view — the thing you'd reach for to see what's organized so far
+— was exactly unavailable for the first stretch of a visit, which read as
+broken rather than cautious. It's gone: the Index (and its dot) are open
+from the first frame, showing the live group/cluster/article breakdown as
+it actually stands, even if that's just "WAITING FOR LIVE ACTIVITY —"
+seconds after load — the same honest, unlocked-from-the-start treatment as
+the Field.
+
+The one thing that still waits is the "top events" digest below (the dark
+panel at the very top of the Index) — see next — since a guessed
+explanation with no real data behind it yet would be worse than no digest
+at all. That's a difference in *content*, not in whether the view can be
+reached: `renderIndexTop()` simply renders nothing until
+`topConfidentClusters()` has something to show, the same function that
+used to gate the whole view.
 
 ### Top events, and why they're active
 

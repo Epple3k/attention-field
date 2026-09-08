@@ -78,20 +78,6 @@ const dom = {
 };
 
 // ---------------------------------------------------------------------
-// Toast — a brief, self-dismissing message. Used for exactly one thing
-// right now: telling someone why scrolling to Index didn't do anything.
-// ---------------------------------------------------------------------
-const toastEl = document.getElementById("toast");
-let toastTimeout = null;
-
-function showToast(text) {
-  toastEl.textContent = text;
-  toastEl.classList.add("is-visible");
-  clearTimeout(toastTimeout);
-  toastTimeout = setTimeout(() => toastEl.classList.remove("is-visible"), 2200);
-}
-
-// ---------------------------------------------------------------------
 // Views — FIELD (the network) and INDEX (the same live data as a text
 // hierarchy). There's no control ribbon or tab bar anymore — the scroll
 // wheel does the switching, with a small pair of position dots (bottom
@@ -104,15 +90,17 @@ function showToast(text) {
 // pattern many two-section sites use, so reading a long list is never
 // interrupted by an accidental flip back to FIELD.
 //
-// INDEX is locked until there's enough live data for its "top events"
-// summary to say something real — see indexReady, set from the frame
-// loop — so nobody scrolls into an empty, uninteresting page.
+// INDEX itself is available immediately — the group/cluster/article
+// breakdown just reflects whatever's live right now, even if that's sparse
+// seconds after load. Only the "top events" digest at the top of it
+// (renderIndexTop, below) waits for real signal before showing anything,
+// since a heuristic guess with no real data behind it yet is worse than no
+// digest at all.
 // ---------------------------------------------------------------------
 const viewsEl = document.getElementById("views");
 const viewEls = { field: document.getElementById("view-field"), index: document.getElementById("view-index") };
 const dotEls = { field: document.getElementById("dot-field"), index: document.getElementById("dot-index") };
 let currentView = "field";
-let indexReady = false; // one-way latch — see computeIndexReady() in the frame loop
 
 function setView(view) {
   if (view === currentView) return;
@@ -124,16 +112,8 @@ function setView(view) {
   if (view === "index") renderIndex(); // jump straight to fresh content, not last frame's
 }
 
-function attemptSwitchToIndex() {
-  if (!indexReady) {
-    showToast("GATHERING DATA — NOT ENOUGH SIGNAL YET");
-    return;
-  }
-  setView("index");
-}
-
 dotEls.field.addEventListener("click", () => setView("field"));
-dotEls.index.addEventListener("click", attemptSwitchToIndex);
+dotEls.index.addEventListener("click", () => setView("index"));
 
 let viewSwitchAccum = 0; // debounce: one switch per gesture, not one per wheel event
 viewsEl.addEventListener(
@@ -147,7 +127,7 @@ viewsEl.addEventListener(
       if (magnitude < 4) return;
       if (e.deltaX > 0 || e.deltaY > 0) {
         viewSwitchAccum = now;
-        attemptSwitchToIndex();
+        setView("index");
       }
       // scrolling "up/back" while already on FIELD has nowhere to go
       return;
@@ -532,7 +512,6 @@ setInterval(updateClock, 1000);
 // Main loop
 // ---------------------------------------------------------------------
 let lastTime = performance.now();
-let indexReadyCheckAccum = 0;
 
 // Delayed slightly rather than fired the instant the page loads — that's
 // the same moment the first batch of brand-new nodes' own category fetches
@@ -596,21 +575,6 @@ function frame(now) {
   } else {
     dom.focusValue.textContent = "SCANNING";
     dom.focusValue.classList.add("is-scanning");
-  }
-
-  // INDEX unlocks once at least one active cluster has a confident
-  // (not "insufficient signal") Pattern Engine read — a one-way latch,
-  // checked on a slow interval rather than every frame since it recomputes
-  // insight text. Once unlocked it stays unlocked even if data thins out.
-  if (!indexReady) {
-    indexReadyCheckAccum += dt;
-    if (indexReadyCheckAccum > 1) {
-      indexReadyCheckAccum = 0;
-      if (topConfidentClusters(1).length > 0) {
-        indexReady = true;
-        dotEls.index.classList.remove("is-locked");
-      }
-    }
   }
 
   currentEventsCheckAccum += dt;

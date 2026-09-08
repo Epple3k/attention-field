@@ -551,8 +551,15 @@ export class Renderer {
     }
 
     // label — only for nodes with enough presence to earn a caption,
-    // nodes anchoring a real cluster, or whichever node is hovered/focused
-    const showLabel = node.radius > 7 || node.heat > 0.35 || node.clustered || isHover || isFocus;
+    // nodes anchoring a real cluster, or whichever node is hovered/focused.
+    // A trending node is exempted from the bare-size trigger: its radius
+    // reflects a guaranteed visibility floor (see articleStore.js), not
+    // topical relevance, so an isolated one that shares no real category
+    // with anything active would otherwise read as a big floating title
+    // connected to nothing — the triangle shape alone still communicates
+    // "heavily read" without forcing text on top of it.
+    const showLabel =
+      isHover || isFocus || node.clustered || (!node.isTrending && (node.radius > 7 || node.heat > 0.35));
     if (showLabel) {
       // cluster anchors (well-connected within their topic) read slightly
       // larger and brighter — a visual center of gravity, not just a dot
