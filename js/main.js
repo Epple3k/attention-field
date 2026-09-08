@@ -332,6 +332,9 @@ function frame(now) {
   lastVisibleNodes = nodes;
 
   renderer.hoverNode = pointer && !dragging ? renderer.hitTest(pointer.x, pointer.y, nodes) : null;
+  // read next tick — hovering stabilizes this node (and its direct ties)
+  // by raising its effective mass, never by pushing on anything else
+  store.setHoveredNode(renderer.hoverNode);
 
   let tieHover = null;
   if (pointer && !renderer.hoverNode && !dragging) {

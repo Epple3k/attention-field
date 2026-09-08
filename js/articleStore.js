@@ -71,6 +71,7 @@ export class ArticleStore {
     this._fieldEnergyEMA = 0;
     this._expandedLabels = new Set(); // clusters the viewer has manually opened
     this._energyBoost = 0; // 0..1 — briefly raised by interactions, decays back to 0
+    this._hoveredNode = null; // set each frame by main.js from the renderer's hover hit-test
 
     this.rangeIndex = 2; // 15M, matches original default
     this.mode = MODE_STEPS[0];
@@ -98,6 +99,50 @@ export class ArticleStore {
    * so the graph keeps visibly resettling instead of snapping still. */
   boostEnergy(amount) {
     this._energyBoost = Math.min(1, this._energyBoost + amount);
+  }
+
+  /** Called once per frame from main.js with whatever node the renderer's
+   * hit-test currently says is hovered (or null). Hovering doesn't push
+   * on anything — see _updateStability — it only changes how much of the
+   * *existing* forces on the hovered node (and its direct ties) take
+   * effect, via effective mass and per-node damping. */
+  setHoveredNode(node) {
+    this._hoveredNode = node;
+  }
+
+  // Eases every node's `stability` (0..1) toward its target each tick:
+  // 1 for the hovered node itself, a partial value for anything directly
+  // tied to it, 0 otherwise. Fast ease-in (hovering should feel immediate)
+  // but a slower ease-out, so releasing the pointer doesn't instantly let
+  // go — physics.integrate() and the mass set below are what actually act
+  // on this value.
+  _updateStability(dt) {
+    const hovered = this._hoveredNode;
+    const neighbors = hovered ? this._getDirectNeighbors(hovered) : null;
+    for (const node of this.nodes.values()) {
+      let target = 0;
+      if (hovered) {
+        if (node === hovered) target = 1;
+        else if (neighbors.has(node)) target = PHYSICS.stabilityNeighborFactor;
+      }
+      const tau = target > node.stability ? PHYSICS.stabilityInTau : PHYSICS.stabilityOutTau;
+      node.stability += (target - node.stability) * Math.min(1, dt / tau);
+      if (node.stability < 0.001) node.stability = 0;
+      node.bodyMass = 1 + node.stability * PHYSICS.stabilityMass;
+    }
+  }
+
+  _getDirectNeighbors(node) {
+    const set = new Set();
+    for (const l of this.topicLinks) {
+      if (l.a === node) set.add(l.b);
+      else if (l.b === node) set.add(l.a);
+    }
+    for (const l of this.links) {
+      if (l.a === node) set.add(l.b);
+      else if (l.b === node) set.add(l.a);
+    }
+    return set;
   }
 
   // -------------------------------------------------------------------
@@ -292,6 +337,7 @@ export class ArticleStore {
     );
     this.clusters = this._pruneClusters();
     this._syncClusterBodies();
+    this._updateStability(dt);
 
     // ---- physics: see physics.js for the force hierarchy this composes ----
     const liveNodes = [...this.nodes.values()];
@@ -639,6 +685,8 @@ export class ArticleStore {
       vx: rand(-6, 6),
       vy: rand(-6, 6),
       pinned: false,
+      stability: 0,
+      bodyMass: 1,
       mass: 0,
       heat: 0,
       radius: BASE_RADIUS,

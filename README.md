@@ -29,9 +29,11 @@ endpoint from the browser — no backend required.
   their values, like a selector switch on an instrument.
 - **Hover** a node for its context summary — title plus a plain-language
   explanation, in a large, high-contrast backed panel, not small text
-  floating loose; **click** to open the article on Wikipedia; **drag** to
-  pull it — release to throw it back into the simulation (see Physics,
-  below).
+  floating loose. Hovering also stabilizes that node (and its direct
+  ties) so it holds still long enough to actually read, without pushing
+  anything else in the field around — see Physics, below. **Click** to
+  open the article on Wikipedia; **drag** to pull it — release to throw
+  it back into the simulation.
 - **Hover** an association tie (the thin lines between nodes) to see why
   the two articles are connected; **click** to pin that focus open.
 - **Hover** a merged cluster shape for a preview of its members; **click**
@@ -132,13 +134,79 @@ match the shape suggested during design: `associationStrength`,
 `centeringStrength`, `dampingHalfLife`, `velocityLimit`, and so on) — no
 magic numbers scattered through the force code itself.
 
-The first tuning pass was too energetic — fast enough that hovering,
-clicking, or dragging a specific node felt like chasing a moving target.
-Every attraction force and the global `velocityLimit` were scaled down
-together (roughly halved), rather than just capping top speed, so the
-whole field reads as calmer rather than merely clamped; collision strength
-was deliberately left alone, since a gentler field still needs a firm
-"never overlap" guarantee.
+Two tuning passes so far, each in response to it feeling wrong in an
+opposite direction:
+
+**Pass 1** — too energetic; hovering, clicking, or dragging a specific
+node felt like chasing a moving target. Every attraction force and the
+global `velocityLimit` were scaled down together, rather than just capping
+top speed, so the whole field read as calmer rather than merely clamped.
+
+**Pass 2** — still too bouncy and reactive: collision was a pure spring
+(a positional push with no way to resist rebound), so contact between
+nodes read as an elastic bounce, and there was no way to stabilize a
+specific area of the field to actually read a label without nearby nodes
+drifting through it. This pass:
+
+- **Softened collision into a damped squish rather than a spring.**
+  `applyCollision` still pushes overlapping bodies apart, but far more
+  mildly than before (`collisionStrength` 900 → 260); the real work is
+  `dampClosingVelocity`, which removes most of two bodies' *closing*
+  velocity on contact (`collisionDamping: 0.88`) rather than relying on
+  the positional push to eventually cancel it out. Verified directly: two
+  nodes sent toward each other at a 120px/s combined closing speed come to
+  rest at the collision boundary with a post-contact rebound of ~0.4px/s —
+  effectively none. The same closing-velocity damping (much lighter,
+  `repulsionDamping: 0.25`) was added to ordinary repulsion too, so it can
+  never read as springy either.
+- **Cut general damping half-life and the velocity ceiling further**
+  (`dampingHalfLife` 0.49s → 0.28s, `velocityLimit` 120 → 70px/s) so
+  displaced nodes lose speed faster and nothing can cross the field in a
+  blur.
+- **Capped every pairwise force's per-frame effect**
+  (`maxPairForce: 55`) so forces move nodes gradually — no single frame's
+  worth of overlap or spring tension can produce a sudden jolt, however
+  large the underlying displacement is.
+- **Added hover stabilization** — see below — which is what actually
+  solves "reading a label near a hovered node was hard because nearby
+  nodes kept moving," rather than just turning down the whole field's
+  energy further (which would fight the still-explicit "don't make it
+  static" requirement).
+
+Collision strength itself was still deliberately kept meaningfully
+positive (not reduced to near-zero) — a gentler field still needs a firm
+"never overlap" guarantee, which is now collisionDamping's job as much as
+collisionStrength's.
+
+### Hover stabilization
+
+Hovering a node is now a real, if temporary, change to the simulation —
+not a rendering-only effect layered on top of physics that doesn't know
+about it. Every node carries a `stability` value (0→1) that eases toward
+1 for whichever node is hovered, a partial value (`stabilityNeighborFactor:
+0.45`) for anything directly tied to it, and 0 for everything else —
+fast to ease in (`stabilityInTau: 0.12s`, so it feels immediate), slower
+to ease out (`stabilityOutTau: 0.7s`, so releasing the pointer doesn't
+instantly let the field go).
+
+Critically, stability does *not* work by adding a new force — the brief
+said hovering must never introduce a new repulsion, and it doesn't. It
+works by temporarily raising that node's effective mass
+(`bodyMass = 1 + stability * stabilityMass`, up to ~46× at full
+stability) and by shortening its own damping half-life
+(`stabilityDampingFactor: 7`). Since every pairwise force in the system
+(springs, summary gravity, repulsion, collision) already splits its effect
+between two bodies by their relative mass, a stabilized node simply
+absorbs almost none of whatever force reaches it — its neighbor absorbs
+the rest, same as it always would. Nothing new pushes on anyone.
+
+Verified directly against the store: hovering a node cuts its displacement
+from an identical nearby disturbance by more than half compared to
+unstabilized; a directly-tied neighbor picks up partial (not full)
+stability; a genuinely unrelated node's stability stays exactly 0 and it
+drifts less than 5px from hovering alone; and stability takes on the order
+of 2 seconds to fully ease out after the pointer moves away, rather than
+dropping in one frame.
 
 Force hierarchy, strongest to weakest:
 
@@ -257,12 +325,12 @@ HTML/CSS/JS with a `<canvas>` field.
 
 Live connection, ~60 concurrent article nodes, pulse-on-edit, decay-when-idle,
 a wheel-controlled GAIN, functional RANGE/MODE/FILTER, real Wikipedia-category
-topic clustering, a tuned-for-calm spring/repulsion/collision/centering
-physics model (see Physics) with draggable nodes and interactive association
-ties (hover for a large, legible explanation panel, click to pin),
-merged/collapsible cluster shapes with real burst-and-resettle physics,
-same-editor event links, high-level topic-group color coding with a legend,
-a synthesis-level FOCUS readout, ambient field-energy glow, and the core
-visual identity are in place. Pageview context (for genuine 24h history),
-trails, sound, and a richer article-inspection panel remain planned
-second-iteration additions.
+topic clustering, a damped soft-collision spring/repulsion/centering physics
+model with per-node hover stabilization (see Physics) with draggable nodes
+and interactive association ties (hover for a large, legible explanation
+panel, click to pin), merged/collapsible cluster shapes with real
+burst-and-resettle physics, same-editor event links, high-level topic-group
+color coding with a legend, a synthesis-level FOCUS readout, ambient
+field-energy glow, and the core visual identity are in place. Pageview
+context (for genuine 24h history), trails, sound, and a richer
+article-inspection panel remain planned second-iteration additions.
