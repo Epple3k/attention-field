@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>ATTENTION FIELD</title>
+<meta name="description" content="A live data-art instrument visualizing real-time editorial activity across English Wikipedia." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+
+  <header class="hud hud--top">
+    <div class="hud__block">
+      <div class="hud__title">ATTENTION FIELD</div>
+      <div class="hud__sub" id="date-readout">— — —</div>
+    </div>
+    <div class="hud__block hud__block--right">
+      <div class="hud__live">
+        <span class="hud__dot" id="live-dot"></span>
+        <span id="live-label">CONNECTING</span>
+      </div>
+      <div class="hud__clock" id="clock-readout">00:00:00</div>
+    </div>
+  </header>
+
+  <main class="field-wrap">
+    <canvas id="field"></canvas>
+    <div class="field__caption">LIVE DATA FIELD — EN.WIKIPEDIA.ORG</div>
+  </main>
+
+  <footer class="hud hud--bottom">
+    <div class="ctrl">
+      <div class="ctrl__label">RANGE</div>
+      <div class="ctrl__value" id="range-value">15M</div>
+      <div class="ctrl__bar" aria-hidden="true"><div class="ctrl__bar-fill" style="width:35%"></div></div>
+    </div>
+    <div class="ctrl ctrl--active">
+      <div class="ctrl__label">GAIN<span class="ctrl__hint">SCROLL</span></div>
+      <div class="ctrl__value" id="gain-value">050</div>
+      <div class="ctrl__bar" aria-hidden="true"><div class="ctrl__bar-fill" id="gain-fill" style="width:50%"></div></div>
+    </div>
+    <div class="ctrl">
+      <div class="ctrl__label">MODE</div>
+      <div class="ctrl__value" id="mode-value">ACTIVITY</div>
+      <div class="ctrl__bar" aria-hidden="true"><div class="ctrl__bar-fill" style="width:100%"></div></div>
+    </div>
+    <div class="ctrl">
+      <div class="ctrl__label">FILTER</div>
+      <div class="ctrl__value" id="filter-value">ALL</div>
+      <div class="ctrl__bar" aria-hidden="true"><div class="ctrl__bar-fill" style="width:100%"></div></div>
+    </div>
+    <div class="ctrl ctrl--readout">
+      <div class="ctrl__label">NODES</div>
+      <div class="ctrl__value" id="node-count">000</div>
+      <div class="ctrl__bar" aria-hidden="true"><div class="ctrl__bar-fill" id="node-fill" style="width:0%"></div></div>
+    </div>
+    <div class="ctrl ctrl--readout">
+      <div class="ctrl__label">EDITS/S</div>
+      <div class="ctrl__value" id="eps-value">0.0</div>
+      <div class="ctrl__bar" aria-hidden="true"><div class="ctrl__bar-fill" id="eps-fill" style="width:0%"></div></div>
+    </div>
+  </footer>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

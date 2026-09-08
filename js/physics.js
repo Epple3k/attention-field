@@ -1,0 +1,90 @@
+// Lightweight, deliberately loose physics for the node field.
+// Nodes drift around a soft "home" position, repel when they overlap,
+// and receive tiny random impulses so the field never sits perfectly still.
+
+const REPEL_STRENGTH = 420;
+const HOME_STRENGTH = 0.35;
+const DAMPING = 0.90;
+const JITTER = 5.5;
+const MAX_SPEED = 60;
+
+export function stepPhysics(nodes, bounds, dt) {
+  const n = nodes.length;
+
+  for (let i = 0; i < n; i++) {
+    const a = nodes[i];
+
+    // gentle pull back toward home position — keeps the field legible
+    // instead of nodes drifting into a corner
+    a.vx += (a.homeX - a.x) * HOME_STRENGTH * dt;
+    a.vy += (a.homeY - a.y) * HOME_STRENGTH * dt;
+
+    // tiny continuous jitter so dormant nodes still feel alive, scaled
+    // down for large nodes so they read as heavier / more settled
+    const jitterScale = 1 / (1 + a.mass * 2);
+    a.vx += (Math.random() - 0.5) * JITTER * jitterScale * dt;
+    a.vy += (Math.random() - 0.5) * JITTER * jitterScale * dt;
+  }
+
+  // pairwise soft repulsion — O(n^2) but n stays under ~70, so it's cheap
+  for (let i = 0; i < n; i++) {
+    const a = nodes[i];
+    for (let j = i + 1; j < n; j++) {
+      const b = nodes[j];
+      let dx = b.x - a.x;
+      let dy = b.y - a.y;
+      let distSq = dx * dx + dy * dy;
+      const minDist = a.radius + b.radius + 14;
+      if (distSq > minDist * minDist || distSq < 0.01) continue;
+      const dist = Math.sqrt(distSq) || 0.01;
+      const overlap = (minDist - dist) / minDist;
+      const force = REPEL_STRENGTH * overlap * dt;
+      const fx = (dx / dist) * force;
+      const fy = (dy / dist) * force;
+      a.vx -= fx;
+      a.vy -= fy;
+      b.vx += fx;
+      b.vy += fy;
+    }
+  }
+
+  for (let i = 0; i < n; i++) {
+    const a = nodes[i];
+    a.vx *= DAMPING;
+    a.vy *= DAMPING;
+
+    const speed = Math.hypot(a.vx, a.vy);
+    if (speed > MAX_SPEED) {
+      a.vx = (a.vx / speed) * MAX_SPEED;
+      a.vy = (a.vy / speed) * MAX_SPEED;
+    }
+
+    a.x += a.vx * dt;
+    a.y += a.vy * dt;
+
+    const pad = a.radius + 24;
+    a.x = clamp(a.x, bounds.left + pad, bounds.right - pad);
+    a.y = clamp(a.y, bounds.top + pad, bounds.bottom - pad);
+  }
+}
+
+/** Impulse applied to nodes near a fresh, energetic pulse — a burst
+ * of attention visibly displaces its neighbors. */
+export function displaceNeighbors(nodes, source, strength) {
+  for (const n of nodes) {
+    if (n === source) continue;
+    const dx = n.x - source.x;
+    const dy = n.y - source.y;
+    const dist = Math.hypot(dx, dy) || 1;
+    const radius = 140;
+    if (dist > radius) continue;
+    const falloff = 1 - dist / radius;
+    const force = strength * falloff * 26;
+    n.vx += (dx / dist) * force;
+    n.vy += (dy / dist) * force;
+  }
+}
+
+function clamp(v, min, max) {
+  return Math.max(min, Math.min(max, v));
+}
