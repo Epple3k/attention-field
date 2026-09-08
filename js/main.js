@@ -10,6 +10,46 @@ const fieldWrap = document.querySelector(".field-wrap");
 const renderer = new Renderer(canvas);
 const store = new ArticleStore();
 
+// ---------------------------------------------------------------------
+// Intro overlay — shown automatically on a visitor's first load (per
+// browser, via localStorage), reachable afterward any time via the
+// header's ABOUT button. Live data starts flowing immediately underneath
+// it regardless of whether it's showing, so nothing is lost by reading it.
+// ---------------------------------------------------------------------
+const SEEN_INTRO_KEY = "attentionField.seenIntro";
+const introEl = document.getElementById("intro");
+const introEnterBtn = document.getElementById("intro-enter");
+const aboutBtn = document.getElementById("about-btn");
+
+function hasSeenIntro() {
+  try {
+    return localStorage.getItem(SEEN_INTRO_KEY) === "1";
+  } catch {
+    return false; // private/blocked storage — just show it every visit
+  }
+}
+
+function markIntroSeen() {
+  try {
+    localStorage.setItem(SEEN_INTRO_KEY, "1");
+  } catch {
+    // ignore — nothing to persist, intro just reappears next visit
+  }
+}
+
+function showIntro() {
+  introEl.classList.remove("is-hidden");
+}
+
+function hideIntro() {
+  introEl.classList.add("is-hidden");
+  markIntroSeen();
+}
+
+if (hasSeenIntro()) hideIntro();
+introEnterBtn.addEventListener("click", hideIntro);
+aboutBtn.addEventListener("click", showIntro);
+
 // group color key — built once from the same GROUPS the renderer colors
 // nodes from, so the legend can never drift out of sync with the field
 const legendEl = document.getElementById("group-legend");

@@ -7,6 +7,117 @@ Not a trending-topics dashboard. An investigation into what collective human
 attention looks like when treated as a live physical system — articles pulse,
 drift, resonate, and decay as edits happen, in real time, in front of you.
 
+## Case Study
+
+**The pitch, if you have thirty seconds:** this is a real-time physics
+simulation, a live semantic-clustering pipeline, an accessibility-validated
+visual system, and a from-scratch text-analysis heuristic — built as one
+coherent instrument rather than four separate portfolio exercises, and
+developed under a real constraint (no working browser in the dev
+environment, for most of the build) that forced every non-trivial claim
+about behavior to be proven with a test against real data instead of
+assumed from reading the code.
+
+### The idea
+
+Wikipedia's live edit stream ([EventStreams](https://stream.wikimedia.org/v2/stream/recentchange))
+is one of the largest, most sincerely public records of what people care
+about that exists on the internet — nobody is editing a Wikipedia article
+to farm engagement. Most tools that touch a stream like this turn it into
+a leaderboard: a ranked list, a trending-now widget, a bar chart. I wanted
+to ask a different question — *what does collective attention look like as
+a physical system, if you let it behave like one?* — and answer it with an
+actual simulation, not a chart with motion tweens bolted on.
+
+### Design decisions worth knowing the "why" behind
+
+- **Every visual property maps to real data, with no exceptions.** Node
+  size is live activity, color is a real Wikipedia topic classification,
+  connections are literal shared categories or shared editors, motion is
+  the output of an actual force simulation. I held this rule strictly
+  enough that when an earlier ambient "field glow" effect turned out to be
+  decorative rather than data-driven, it got removed rather than kept for
+  atmosphere.
+- **Clustering comes from Wikipedia's own taxonomy, not a guessed
+  similarity score.** Two articles are only "related" in this app if they
+  genuinely share a Wikipedia category, fetched live from the public API.
+  No embeddings, no invented distance metric — the easy path (a fuzzy
+  string-similarity heuristic) would have been faster to build and easy to
+  mistake for correct; the real API call is more honest about what it can
+  and can't claim.
+- **A physics engine, not a set of CSS transitions.** Nodes move under a
+  real force model — Hooke's-law association springs, mass-weighted
+  repulsion and damped (non-elastic) collision, a "summary gravity" body
+  per topic cluster with its own effective mass, and a hover-stabilization
+  mechanic that makes a node resistant to being pushed by *raising its own
+  effective mass* rather than by adding a new repulsive force anywhere —
+  which turned out to be the more interesting engineering problem than the
+  visual design was.
+- **Accessible color, checked, not assumed.** The four topic-group hues
+  were run through the `dataviz` skill's actual colorblind-simulation and
+  contrast checker (Delta-E in OKLab, Machado-Oliveira-Fernandes CVD
+  simulation) against this app's real background — twice, once for an
+  initial dark theme and again after the whole palette flipped light —
+  rather than picked by eye and hoped to be fine. Where the checker found
+  a real limit (full pairwise separation for a scatter layout tops out at
+  3 hues with this palette; a 4th introduces one imperfect pair), that
+  limit is disclosed in this README rather than hidden.
+- **A named, attributed analysis engine instead of a black box.** The
+  "why is this cluster active" text isn't hardcoded and isn't a call to an
+  external model — it's a real heuristic (`js/insights.js`) that tokenizes
+  live edit summaries, filters MediaWiki boilerplate, and cross-references
+  keyword repetition against how many *distinct editors* used it, so a
+  bot repeating its own summary across pages can't be mistaken for
+  independent public interest. It's labeled in the UI as its own
+  subsystem ("PATTERN ENGINE") because it earned that framing rather than
+  being asked to wear it.
+
+### Engineering challenges actually solved
+
+- **Verifying a simulation I couldn't watch run.** Most of this build
+  happened without a working browser in the dev environment. Rather than
+  ship physics changes on faith, I built a set of standalone Node
+  scripts that import the real simulation modules and drive them directly
+  against the live Wikipedia API — dragging a node and checking it
+  actually recovers, firing a collision and measuring the rebound speed,
+  hovering a node and checking a genuinely unrelated one doesn't move.
+  That harness caught two real, ship-blocking bugs before either reached
+  the browser: a sign error in a force-application refactor that would
+  have made every "related" pair of articles fly apart instead of
+  together, and a strength imbalance that let a strong attraction force
+  occasionally win against the collision system meant to prevent overlap.
+  Both were found by a failing assertion against real data, not by
+  reading the code and hoping.
+- **Distinguishing signal from noise in free-text edit summaries** with no
+  ML model, no API call, and no labeled training data — just tokenization,
+  a domain-specific stopword list, and one deliberate design choice
+  (requiring cross-editor agreement before a keyword counts as a real
+  pattern) that was added specifically because a test scenario exposed the
+  naive version producing a false positive.
+- **Keeping a live force simulation legible while interactive.** Hovering
+  a node needed to make it — and, more subtly, only its direct
+  neighbors — resistant to being disturbed, without adding any new force
+  to the rest of the field (an explicit, deliberately hard constraint).
+  The solution reuses the same mass-weighted force-splitting mechanism the
+  simulation already used for "heavier" cluster bodies, applied to
+  temporary per-node hover state instead — one mechanism doing two jobs
+  rather than two mechanisms doing one job each.
+
+### Skills this project is meant to demonstrate
+
+Real-time data ingestion (Server-Sent Events) · 2D physics simulation from
+first principles · information architecture and semantic clustering ·
+accessibility-driven color system design · lightweight NLP-style heuristic
+analysis · state management and rendering-layer separation in vanilla
+JS with zero framework dependencies · a testing discipline built specifically
+around a constraint (no visual feedback loop) rather than abandoned because
+of it.
+
+The full build log — including the two physics-tuning passes, the sign-bug
+catch, and the light-theme palette re-validation — is in the git history and
+the sections below, in the same level of technical detail it was actually
+built with.
+
 ## Running locally
 
 Any static file server works. For example:

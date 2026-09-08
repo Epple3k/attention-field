@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
 <title>ATTENTION FIELD</title>
 <meta name="description" content="A live data-art instrument visualizing real-time editorial activity across English Wikipedia." />
+<link rel="icon" type="image/png" href="assets/logo.png" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
@@ -12,9 +13,43 @@
 </head>
 <body>
 
+  <div class="intro" id="intro" role="dialog" aria-modal="true" aria-labelledby="intro-title">
+    <div class="intro__panel">
+      <img class="intro__logo" src="assets/logo.png" alt="Attention Field logo — a tangled ribbon of colored signal lines forming a head in profile" />
+      <div class="intro__title" id="intro-title">ATTENTION FIELD</div>
+      <div class="intro__tagline">A live instrument for watching collective attention move.</div>
+
+      <p class="intro__body">
+        Every dot on screen is a real Wikipedia article being edited somewhere
+        right now. Wikipedia is one of the largest, most sincerely public
+        records of what people care about — nobody's optimizing an edit for
+        engagement. I wanted to watch that as a living system, not read it as
+        a leaderboard.
+      </p>
+
+      <div class="intro__why-label">WHY IT'S BUILT THIS WAY</div>
+      <ul class="intro__list">
+        <li>No dashboard, no charts, no trending list — a physical field where distance, motion, and color are the only vocabulary</li>
+        <li>Every visual property maps to real data: size is activity, color is topic, connections are real shared Wikipedia categories, motion is real physics — nothing here is decorative animation</li>
+        <li>Clusters form from Wikipedia's own category taxonomy, not a guessed similarity score</li>
+        <li>A Pattern Engine reads live edit summaries to guess <em>why</em> a topic is active, the way a human analyst would</li>
+        <li>Built and verified without ever seeing it render — the physics and data layer were tested numerically against the live API, not eyeballed</li>
+      </ul>
+
+      <div class="intro__actions">
+        <button class="intro__enter" id="intro-enter">ENTER FIELD →</button>
+        <a class="intro__case-study" href="https://github.com/Epple3k/attention-field#case-study" target="_blank" rel="noopener">READ THE CASE STUDY ↗</a>
+      </div>
+    </div>
+  </div>
+
   <header class="hud hud--top">
     <div class="hud__block">
-      <div class="hud__title">ATTENTION FIELD</div>
+      <div class="hud__title-row">
+        <img class="hud__logo" src="assets/logo.png" alt="" />
+        <div class="hud__title">ATTENTION FIELD</div>
+        <button class="hud__about" id="about-btn" aria-label="About this project">ABOUT</button>
+      </div>
       <div class="hud__sub" id="date-readout">— — —</div>
     </div>
     <div class="hud__focus">
