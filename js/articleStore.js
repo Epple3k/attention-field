@@ -1,15 +1,22 @@
 // Data Processor + Article State Store.
-// Owns the live set of active article nodes, the transient pulse rings and
-// event links spawned by edits, and the persistent topic clusters computed
-// from real Wikipedia category data. Knows nothing about rendering.
+// Owns the live set of article nodes, the transient pulse rings and event
+// ties spawned by edits, the persistent topic clusters computed from real
+// Wikipedia category data, and the cluster "bodies" that anchor them in the
+// physics simulation. Knows nothing about rendering.
 
 import {
-  stepPhysics,
+  PHYSICS,
+  applyAssociationSprings,
+  applySummaryGravity,
+  applyClusterBodyCohesion,
+  applyRepulsion,
+  applyCollision,
+  applyCentering,
+  integrate,
+  applyImpulse,
   displaceNeighbors,
-  applyLinkForces,
-  applyTopicForces,
-  applyClusterCollapseForce,
 } from "./physics.js";
+import { clusterShapeRadius, mapAssociationStrength, clamp01 } from "./geometry.js";
 import { fetchCategoriesBatch } from "./categoryService.js";
 
 const MAX_NODES = 60;
@@ -20,8 +27,8 @@ const MAX_RADIUS = 26;
 const RING_LIFETIME = 0.9; // seconds
 
 const MAJOR_DELTA = 500; // characters — threshold for a "substantial" edit
-const LINK_WINDOW_MS = 90 * 1000; // same editor touching 2 articles within this window = an event link
-const LINK_LIFETIME = 6; // seconds an event link stays visible once formed
+const LINK_WINDOW_MS = 90 * 1000; // same editor touching 2 articles within this window = an event tie
+const LINK_LIFETIME = 6; // seconds an event tie stays visible once formed
 const MAX_LINKS = 60;
 const MAX_RECENT_PER_USER = 5;
 const VOLUME_REFERENCE = 14; // edits-in-range that count as a "full" node in VOLUME mode
@@ -46,9 +53,11 @@ export class ArticleStore {
     /** @type {Map<string, object>} */
     this.nodes = new Map();
     this.rings = [];
-    this.links = []; // transient same-editor event links
-    this.topicLinks = []; // persistent shared-category structural links
+    this.links = []; // transient same-editor event ties
+    this.topicLinks = []; // persistent shared-category structural ties
     this.clusters = []; // connected components over topicLinks, size >= 2
+    /** @type {Map<string, object>} cluster label -> physics body {x,y,vx,vy,radius,bodyMass} */
+    this.clusterBodies = new Map();
     this.bounds = { left: 0, top: 0, right: 0, bottom: 0 };
     this._editTimestamps = [];
     this._recentByUser = new Map();
@@ -60,6 +69,7 @@ export class ArticleStore {
     this._clusterRecomputeAccum = 0;
     this._fieldEnergyEMA = 0;
     this._expandedLabels = new Set(); // clusters the viewer has manually opened
+    this._energyBoost = 0; // 0..1 — briefly raised by interactions, decays back to 0
 
     this.rangeIndex = 2; // 15M, matches original default
     this.mode = MODE_STEPS[0];
@@ -82,6 +92,36 @@ export class ArticleStore {
     this.filter = f;
   }
 
+  /** Interactions (drag release, cluster expand, tie activation, a fresh
+   * node appearing) call this to briefly loosen the simulation's damping
+   * so the graph keeps visibly resettling instead of snapping still. */
+  boostEnergy(amount) {
+    this._energyBoost = Math.min(1, this._energyBoost + amount);
+  }
+
+  // -------------------------------------------------------------------
+  // Dragging — the node follows the cursor directly (pinned, so the
+  // simulation's integrator skips it) while held, then is released back
+  // into the simulation with a real velocity derived from the drag motion.
+  // -------------------------------------------------------------------
+  beginDrag(node) {
+    node.pinned = true;
+    node.vx = 0;
+    node.vy = 0;
+  }
+
+  dragTo(node, x, y) {
+    node.x = x;
+    node.y = y;
+  }
+
+  endDrag(node, vx, vy) {
+    node.pinned = false;
+    node.vx = vx;
+    node.vy = vy;
+    this.boostEnergy(0.6);
+  }
+
   /** Opens a collapsed cluster into its individual nodes, or re-collapses
    * one the viewer previously opened. Keyed by label since cluster
    * membership objects are rebuilt on every recompute. */
@@ -94,6 +134,7 @@ export class ArticleStore {
     if (this._expandedLabels.has(label)) return;
     this._expandedLabels.add(label);
     this._burstCluster(label);
+    this.boostEnergy(0.8);
   }
 
   collapseCluster(label) {
@@ -102,6 +143,18 @@ export class ArticleStore {
 
   getExpandedClusters() {
     return this.clusters.filter((c) => c.expanded);
+  }
+
+  /** Hovering/clicking a tie is itself a meaningful interaction — nudge
+   * both endpoints and wake the simulation a little. */
+  activateTie(tie) {
+    const dx = tie.b.x - tie.a.x;
+    const dy = tie.b.y - tie.a.y;
+    const dist = Math.hypot(dx, dy) || 1;
+    const angle = Math.atan2(dy, dx);
+    applyImpulse(tie.a, angle + Math.PI, 12);
+    applyImpulse(tie.b, angle, 12);
+    this.boostEnergy(0.3);
   }
 
   // A one-time outward kick applied at the instant a cluster opens, plus a
@@ -150,6 +203,7 @@ export class ArticleStore {
 
     const gainFactor = gain / 50; // 50 == neutral/unity gain
     let node = this.nodes.get(edit.title);
+    const isNewNode = !node;
 
     if (!node) {
       if (this.nodes.size >= MAX_NODES) this._evictWeakest();
@@ -173,11 +227,8 @@ export class ArticleStore {
       strength: 0.4 + 0.6 * Math.min(1, gainFactor),
     });
 
-    displaceNeighbors(
-      [...this.nodes.values()],
-      node,
-      0.5 + node.heat * gainFactor
-    );
+    displaceNeighbors([...this.nodes.values()], node, 0.5 + node.heat * gainFactor);
+    if (isNewNode) this.boostEnergy(0.35);
 
     this._linkToRecentByUser(edit.user, node, now);
 
@@ -221,27 +272,45 @@ export class ArticleStore {
       }
     }
 
-    if (nodes.length) {
-      applyLinkForces(this.links, dt);
-      applyTopicForces(this.topicLinks, dt);
-      applyClusterCollapseForce(this.clusters, dt);
-      stepPhysics(nodes, this.bounds, dt);
-    }
-
     for (const ring of this.rings) ring.age += dt;
     this.rings = this.rings.filter((r) => r.age < RING_LIFETIME);
 
-    for (const link of this.links) link.age += dt;
+    for (const link of this.links) {
+      link.age += dt;
+      // event ties fade: strength (physics pull) and freshness both track
+      // how recently it formed, mapped through the same restrained scale
+      // as topic ties rather than used raw
+      link.strength = mapAssociationStrength(clamp01(1 - link.age / link.life));
+    }
     this.links = this.links.filter(
       (l) => l.age < LINK_LIFETIME && this.nodes.has(l.a.title) && this.nodes.has(l.b.title)
     );
 
-    // keep topology consistent with whatever the removal pass above just did,
-    // even between the slower recompute cycles below
     this.topicLinks = this.topicLinks.filter(
       (l) => this.nodes.has(l.a.title) && this.nodes.has(l.b.title)
     );
     this.clusters = this._pruneClusters();
+    this._syncClusterBodies();
+
+    // ---- physics: see physics.js for the force hierarchy this composes ----
+    const liveNodes = [...this.nodes.values()];
+    const bodies = [...liveNodes, ...this.clusterBodies.values()];
+    if (bodies.length) {
+      applyAssociationSprings(this.topicLinks, dt);
+      applyAssociationSprings(this.links, dt);
+      applySummaryGravity(this.clusters, this.clusterBodies, dt);
+      applyClusterBodyCohesion(this.clusters, this.clusterBodies, dt);
+      applyRepulsion(bodies, dt);
+      applyCollision(bodies, dt);
+      const center = {
+        x: (this.bounds.left + this.bounds.right) / 2,
+        y: (this.bounds.top + this.bounds.bottom) / 2,
+      };
+      applyCentering(bodies, center, dt);
+      integrate(bodies, this.bounds, dt, PHYSICS, this._energyBoost);
+    }
+
+    this._energyBoost *= Math.exp((-Math.LN2 * dt) / PHYSICS.energyBoostHalfLife);
 
     const cutoff = now - 1000;
     while (this._editTimestamps.length && this._editTimestamps[0] < cutoff) {
@@ -290,6 +359,38 @@ export class ArticleStore {
       .filter((c) => c.members.length >= 2);
   }
 
+  // Keeps one physics body per collapsible cluster — a real, persistent
+  // entity with its own position/velocity (see applyClusterBodyCohesion),
+  // not a value recomputed from scratch each frame. Created at the live
+  // member centroid so it doesn't "pop" in somewhere arbitrary; removed
+  // once its cluster no longer qualifies.
+  _syncClusterBodies() {
+    const active = new Set();
+    for (const c of this.clusters) {
+      if (!c.collapsible) continue;
+      active.add(c.label);
+      const n = c.members.length;
+      let body = this.clusterBodies.get(c.label);
+      if (!body) {
+        let cx = 0;
+        let cy = 0;
+        for (const m of c.members) {
+          cx += m.x;
+          cy += m.y;
+        }
+        cx /= n;
+        cy /= n;
+        body = { x: cx, y: cy, vx: 0, vy: 0, radius: 0, bodyMass: 1 };
+        this.clusterBodies.set(c.label, body);
+      }
+      body.radius = clusterShapeRadius(n);
+      body.bodyMass = 1 + n * PHYSICS.clusterBodyMassPerMember;
+    }
+    for (const label of [...this.clusterBodies.keys()]) {
+      if (!active.has(label)) this.clusterBodies.delete(label);
+    }
+  }
+
   getNodes() {
     return [...this.nodes.values()];
   }
@@ -310,12 +411,42 @@ export class ArticleStore {
     return this.clusters;
   }
 
+  getClusterBody(label) {
+    return this.clusterBodies.get(label);
+  }
+
   getFieldEnergy() {
     return this._fieldEnergyEMA;
   }
 
   getEditsPerSecond() {
     return this._editTimestamps.length;
+  }
+
+  // -------------------------------------------------------------------
+  // Context summaries — short, plain explanations for whatever the
+  // viewer is currently pointing at.
+  // -------------------------------------------------------------------
+
+  describeNode(node) {
+    const idleSeconds = Math.max(0, (performance.now() - node.lastActive) / 1000);
+    const recency =
+      idleSeconds < 5 ? "moments ago" : idleSeconds < 90 ? `${Math.round(idleSeconds)}s ago` : `${Math.round(idleSeconds / 60)}m ago`;
+    const editWord = node.edits === 1 ? "edit" : "edits";
+    return `Wikipedia article — ${node.edits} ${editWord} observed, last active ${recency}.`;
+  }
+
+  describeCluster(cluster) {
+    const n = cluster.members.length;
+    return `${n} articles connected by the shared Wikipedia category "${cluster.label}."`;
+  }
+
+  describeTie(tie, kind) {
+    if (kind === "topic") {
+      return `"${tie.a.title}" and "${tie.b.title}" are both categorized under "${tie.category}" on Wikipedia.`;
+    }
+    const user = tie.user || "the same editor";
+    return `${user} edited both "${tie.a.title}" and "${tie.b.title}" within the last 90 seconds.`;
   }
 
   _passesFilter(edit) {
@@ -343,7 +474,7 @@ export class ArticleStore {
 
     for (const prev of fresh) {
       if (prev.node !== node && this.nodes.has(prev.node.title)) {
-        this._addLink(prev.node, node);
+        this._addLink(prev.node, node, user);
       }
     }
 
@@ -352,13 +483,11 @@ export class ArticleStore {
     this._recentByUser.set(user, fresh);
   }
 
-  _addLink(a, b) {
-    const exists = this.links.some(
-      (l) => (l.a === a && l.b === b) || (l.a === b && l.b === a)
-    );
+  _addLink(a, b, user) {
+    const exists = this.links.some((l) => (l.a === a && l.b === b) || (l.a === b && l.b === a));
     if (exists) return;
     if (this.links.length >= MAX_LINKS) this.links.shift();
-    this.links.push({ a, b, age: 0, life: LINK_LIFETIME });
+    this.links.push({ a, b, age: 0, life: LINK_LIFETIME, strength: mapAssociationStrength(1), user });
   }
 
   async _flushCategoryQueue() {
@@ -384,9 +513,12 @@ export class ArticleStore {
   // Builds the field's topic structure from real shared Wikipedia
   // categories: an edge forms between any two active articles that share a
   // category, labeled with the most specific (least common, among currently
-  // active nodes) category they have in common. Connected components of
-  // size >= 2 become clusters; the renderer only draws a named halo for
-  // size >= 3 so a single coincidental pair doesn't read as "a topic."
+  // active nodes) category they have in common. That same rarity also maps
+  // (through a restrained scale) into the tie's physics strength, so a very
+  // specific shared category pulls harder than a broad, common one.
+  // Connected components of size >= 2 become clusters; the renderer only
+  // draws a named halo for size >= 3 so a coincidental pair doesn't read as
+  // "a topic."
   _recomputeClusters() {
     const all = [...this.nodes.values()];
     for (const n of all) {
@@ -405,6 +537,7 @@ export class ArticleStore {
     for (const n of nodes) {
       for (const c of n.categories) freq.set(c, (freq.get(c) || 0) + 1);
     }
+    const maxFreq = Math.max(1, ...freq.values());
 
     const links = [];
     for (let i = 0; i < nodes.length; i++) {
@@ -422,7 +555,9 @@ export class ArticleStore {
           }
         }
         if (best) {
-          links.push({ a, b, category: best });
+          // rarer shared category (lower bestScore) => higher raw strength
+          const raw = clamp01(1 - (bestScore - 1) / Math.max(1, maxFreq - 1));
+          links.push({ a, b, category: best, strength: mapAssociationStrength(raw) });
           a.topicDegree += 1;
           b.topicDegree += 1;
         }
@@ -491,18 +626,15 @@ export class ArticleStore {
 
   _createNode(edit) {
     const b = this.bounds;
-    const marginX = (b.right - b.left) * 0.12;
-    const marginY = (b.bottom - b.top) * 0.12;
-    const homeX = rand(b.left + marginX, b.right - marginX);
-    const homeY = rand(b.top + marginY, b.bottom - marginY);
+    const marginX = (b.right - b.left) * 0.16;
+    const marginY = (b.bottom - b.top) * 0.16;
     return {
       title: edit.title,
-      x: homeX,
-      y: homeY,
+      x: rand(b.left + marginX, b.right - marginX),
+      y: rand(b.top + marginY, b.bottom - marginY),
       vx: rand(-6, 6),
       vy: rand(-6, 6),
-      homeX,
-      homeY,
+      pinned: false,
       mass: 0,
       heat: 0,
       radius: BASE_RADIUS,

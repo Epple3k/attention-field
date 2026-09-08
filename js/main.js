@@ -1,6 +1,7 @@
 import { connectStream } from "./eventStream.js";
 import { ArticleStore, RANGE_STEPS, MODE_STEPS, FILTER_STEPS } from "./articleStore.js";
 import { Renderer } from "./renderer.js";
+import { tieKey } from "./geometry.js";
 
 const canvas = document.getElementById("field");
 const fieldWrap = document.querySelector(".field-wrap");
@@ -150,10 +151,18 @@ window.addEventListener("resize", resize);
 resize();
 
 // ---------------------------------------------------------------------
-// Hover / click.
-// - Hovering an individual node highlights it; clicking it opens the
-//   article. Node hover always wins over cluster hover so members stay
-//   reachable inside an expanded cluster.
+// Hover / click / drag.
+// - Hovering an individual node highlights it and shows its context
+//   summary; clicking (without dragging) opens the article. Node hover
+//   always wins over tie/cluster hover so members stay reachable inside
+//   an expanded cluster.
+// - Dragging a node moves it directly; releasing throws it back into the
+//   simulation with real velocity from the drag motion, and briefly
+//   loosens damping so the graph visibly resettles.
+// - Hovering an association tie emphasizes it and both endpoints, dims
+//   everything else, and shows why the two articles are connected.
+//   Clicking a tie pins that state open; clicking empty space (or the
+//   same tie again) releases it.
 // - Clicking a collapsed cluster's merged shape opens it — members burst
 //   outward to their own positions.
 // - An expanded cluster closes by clicking *outside* its boundary
@@ -161,20 +170,91 @@ resize();
 //   inside that boundary, or on one of its nodes, leaves it open.
 // ---------------------------------------------------------------------
 let pointer = null;
+let lastVisibleNodes = [];
+let pinnedTie = null; // { key, kind } — see geometry.tieKey
+
+let dragCandidate = null;
+let dragging = false;
+let dragStart = null;
+let dragHistory = [];
+let suppressNextClick = false;
+
 canvas.addEventListener("mousemove", (e) => {
   const rect = canvas.getBoundingClientRect();
   pointer = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+
+  if (dragCandidate) {
+    if (!dragging && Math.hypot(pointer.x - dragStart.x, pointer.y - dragStart.y) > 4) {
+      dragging = true;
+      store.beginDrag(dragCandidate);
+      renderer.dragNode = dragCandidate;
+    }
+    if (dragging) {
+      store.dragTo(dragCandidate, pointer.x, pointer.y);
+      dragHistory.push({ x: pointer.x, y: pointer.y, t: performance.now() });
+      if (dragHistory.length > 5) dragHistory.shift();
+    }
+  }
 });
+
+canvas.addEventListener("mousedown", () => {
+  if (!pointer) return;
+  const hit = renderer.hitTest(pointer.x, pointer.y, lastVisibleNodes);
+  if (!hit) return;
+  dragCandidate = hit;
+  dragStart = { x: pointer.x, y: pointer.y };
+  dragging = false;
+  dragHistory = [{ x: pointer.x, y: pointer.y, t: performance.now() }];
+});
+
+window.addEventListener("mouseup", () => {
+  if (!dragCandidate) return;
+  if (dragging) {
+    let vx = 0;
+    let vy = 0;
+    if (dragHistory.length >= 2) {
+      const first = dragHistory[0];
+      const last = dragHistory[dragHistory.length - 1];
+      const dt = Math.max(0.02, (last.t - first.t) / 1000);
+      vx = (last.x - first.x) / dt;
+      vy = (last.y - first.y) / dt;
+    }
+    store.endDrag(dragCandidate, vx, vy);
+    renderer.dragNode = null;
+    suppressNextClick = true;
+  }
+  dragCandidate = null;
+  dragging = false;
+  dragHistory = [];
+});
+
 canvas.addEventListener("mouseleave", () => {
   pointer = null;
   renderer.hoverNode = null;
   renderer.hoverCluster = null;
+  renderer.hoverTie = null;
 });
+
 canvas.addEventListener("click", () => {
+  if (suppressNextClick) {
+    suppressNextClick = false;
+    return;
+  }
   if (!pointer) return;
 
   if (renderer.hoverNode) {
     window.open(renderer.hoverNode.url, "_blank", "noopener");
+    return;
+  }
+
+  if (renderer.hoverTie) {
+    const key = tieKey(renderer.hoverTie.tie);
+    if (pinnedTie && pinnedTie.key === key) {
+      pinnedTie = null;
+    } else {
+      pinnedTie = { key, kind: renderer.hoverTie.kind };
+      store.activateTie(renderer.hoverTie.tie);
+    }
     return;
   }
 
@@ -183,6 +263,9 @@ canvas.addEventListener("click", () => {
     return;
   }
 
+  // empty-space click: release any pinned tie and collapse any clusters
+  // the click landed outside of
+  pinnedTie = null;
   const clusters = store.getClusters();
   if (!renderer.isInsideExpandedCluster(pointer.x, pointer.y, clusters)) {
     for (const c of clusters) {
@@ -233,13 +316,40 @@ function frame(now) {
 
   store.tick(dt);
   const nodes = renderer.draw(store);
+  lastVisibleNodes = nodes;
 
-  renderer.hoverNode = pointer ? renderer.hitTest(pointer.x, pointer.y, nodes) : null;
+  renderer.hoverNode = pointer && !dragging ? renderer.hitTest(pointer.x, pointer.y, nodes) : null;
+
+  let tieHover = null;
+  if (pointer && !renderer.hoverNode && !dragging) {
+    tieHover = renderer.hitTestTie(
+      pointer.x,
+      pointer.y,
+      store.getTopicLinks(),
+      store.getLinks(),
+      renderer.hiddenNodes
+    );
+  }
+  // a pinned tie is re-resolved by key every frame, since topic ties are
+  // rebuilt into new objects on each topology recompute
+  if (!tieHover && pinnedTie) {
+    const list = pinnedTie.kind === "topic" ? store.getTopicLinks() : store.getLinks();
+    const resolved = list.find((t) => tieKey(t) === pinnedTie.key);
+    if (resolved) tieHover = { tie: resolved, kind: pinnedTie.kind };
+    else pinnedTie = null;
+  }
+  renderer.hoverTie = tieHover;
+
   renderer.hoverCluster =
-    pointer && !renderer.hoverNode
+    pointer && !renderer.hoverNode && !tieHover && !dragging
       ? renderer.hitTestCluster(pointer.x, pointer.y, store.getClusters())
       : null;
-  canvas.style.cursor = renderer.hoverNode || renderer.hoverCluster ? "pointer" : "default";
+
+  canvas.style.cursor = dragging
+    ? "grabbing"
+    : renderer.hoverNode || renderer.hoverTie || renderer.hoverCluster
+      ? "pointer"
+      : "default";
 
   // the readout counts every article the system is actually tracking,
   // including ones currently merged into a collapsed cluster shape
