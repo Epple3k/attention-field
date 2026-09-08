@@ -1,14 +1,19 @@
 import { connectStream } from "./eventStream.js";
-import { ArticleStore, RANGE_STEPS, MODE_STEPS, FILTER_STEPS } from "./articleStore.js";
+import { ArticleStore } from "./articleStore.js";
 import { Renderer } from "./renderer.js";
 import { tieKey } from "./geometry.js";
 import { GROUPS } from "./groups.js";
 import { generateClusterInsight } from "./insights.js";
 
 const canvas = document.getElementById("field");
-const fieldWrap = document.querySelector(".field-wrap");
 const renderer = new Renderer(canvas);
 const store = new ArticleStore();
+
+// GAIN/RANGE/MODE/FILTER no longer have a UI (the control ribbon was
+// removed) — the store just runs on its built-in defaults (RANGE 15M,
+// MODE ACTIVITY, FILTER ALL) and every edit affects the field at unity
+// gain, same as the old GAIN=50 default did.
+const GAIN = 50;
 
 // ---------------------------------------------------------------------
 // Intro overlay — shown automatically on a visitor's first load (per
@@ -67,189 +72,153 @@ const dom = {
   date: document.getElementById("date-readout"),
   liveDot: document.getElementById("live-dot"),
   liveLabel: document.getElementById("live-label"),
-  gainValue: document.getElementById("gain-value"),
-  gainFill: document.getElementById("gain-fill"),
-  rangeCtrl: document.getElementById("range-ctrl"),
-  rangeValue: document.getElementById("range-value"),
-  rangeFill: document.getElementById("range-fill"),
-  modeCtrl: document.getElementById("mode-ctrl"),
-  modeValue: document.getElementById("mode-value"),
-  modeFill: document.getElementById("mode-fill"),
-  filterCtrl: document.getElementById("filter-ctrl"),
-  filterValue: document.getElementById("filter-value"),
-  filterFill: document.getElementById("filter-fill"),
-  nodeCount: document.getElementById("node-count"),
-  nodeFill: document.getElementById("node-fill"),
-  clustersCount: document.getElementById("clusters-count"),
-  clustersFill: document.getElementById("clusters-fill"),
-  linksCount: document.getElementById("links-count"),
-  linksFill: document.getElementById("links-fill"),
-  epsValue: document.getElementById("eps-value"),
-  epsFill: document.getElementById("eps-fill"),
-  elapsedValue: document.getElementById("elapsed-value"),
   focusValue: document.getElementById("focus-value"),
 };
 
-function flash(el) {
-  el.classList.remove("is-changed");
-  void el.offsetWidth; // force reflow so the animation restarts on repeat triggers
-  el.classList.add("is-changed");
-}
-
 // ---------------------------------------------------------------------
-// GAIN — continuous, scroll-over-the-field. Governs how strongly each
-// incoming edit affects the field.
+// Toast — a brief, self-dismissing message. Used for exactly one thing
+// right now: telling someone why scrolling to Index didn't do anything.
 // ---------------------------------------------------------------------
-let gain = 50; // 0–100, 50 = unity
+const toastEl = document.getElementById("toast");
+let toastTimeout = null;
 
-function setGain(next) {
-  gain = Math.max(0, Math.min(100, next));
-  dom.gainValue.textContent = String(Math.round(gain)).padStart(3, "0");
-  dom.gainFill.style.width = `${gain}%`;
+function showToast(text) {
+  toastEl.textContent = text;
+  toastEl.classList.add("is-visible");
+  clearTimeout(toastTimeout);
+  toastTimeout = setTimeout(() => toastEl.classList.remove("is-visible"), 2200);
 }
-setGain(gain);
-
-fieldWrap.addEventListener(
-  "wheel",
-  (e) => {
-    // a mostly-horizontal gesture here is a view-switch attempt (see the
-    // .views handler below), not a GAIN adjustment — let it bubble
-    if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
-    e.preventDefault();
-    const delta = e.deltaY > 0 ? -2 : 2;
-    setGain(gain + delta);
-  },
-  { passive: false }
-);
-
-// ---------------------------------------------------------------------
-// RANGE / MODE / FILTER — discrete instrument controls. Each responds to
-// both a click (step forward, like a selector button) and a scroll while
-// hovered (step forward/back), so the interaction language stays
-// consistent with GAIN without competing for the same gesture.
-// ---------------------------------------------------------------------
-function setRange(index) {
-  store.setRangeIndex(index);
-  const step = RANGE_STEPS[store.rangeIndex];
-  dom.rangeValue.textContent = step.label;
-  dom.rangeFill.style.width = `${((store.rangeIndex + 1) / RANGE_STEPS.length) * 100}%`;
-  flash(dom.rangeValue);
-}
-setRange(store.rangeIndex);
-
-function cycleMode(dir) {
-  const i = MODE_STEPS.indexOf(store.mode);
-  const next = MODE_STEPS[(i + dir + MODE_STEPS.length) % MODE_STEPS.length];
-  store.setMode(next);
-  dom.modeValue.textContent = next;
-  dom.modeFill.style.width = `${((MODE_STEPS.indexOf(next) + 1) / MODE_STEPS.length) * 100}%`;
-  flash(dom.modeValue);
-}
-
-function cycleFilter(dir) {
-  const i = FILTER_STEPS.indexOf(store.filter);
-  const next = FILTER_STEPS[(i + dir + FILTER_STEPS.length) % FILTER_STEPS.length];
-  store.setFilter(next);
-  dom.filterValue.textContent = next;
-  dom.filterFill.style.width = `${((FILTER_STEPS.indexOf(next) + 1) / FILTER_STEPS.length) * 100}%`;
-  flash(dom.filterValue);
-}
-
-dom.rangeCtrl.addEventListener("click", () => setRange(store.rangeIndex + 1));
-dom.rangeCtrl.addEventListener(
-  "wheel",
-  (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setRange(store.rangeIndex + (e.deltaY > 0 ? -1 : 1));
-  },
-  { passive: false }
-);
-dom.rangeCtrl.addEventListener("keydown", (e) => {
-  if (e.key === "Enter" || e.key === " ") setRange(store.rangeIndex + 1);
-});
-
-dom.modeCtrl.addEventListener("click", () => cycleMode(1));
-dom.modeCtrl.addEventListener(
-  "wheel",
-  (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    cycleMode(e.deltaY > 0 ? -1 : 1);
-  },
-  { passive: false }
-);
-dom.modeCtrl.addEventListener("keydown", (e) => {
-  if (e.key === "Enter" || e.key === " ") cycleMode(1);
-});
-
-dom.filterCtrl.addEventListener("click", () => cycleFilter(1));
-dom.filterCtrl.addEventListener(
-  "wheel",
-  (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    cycleFilter(e.deltaY > 0 ? -1 : 1);
-  },
-  { passive: false }
-);
-dom.filterCtrl.addEventListener("keydown", (e) => {
-  if (e.key === "Enter" || e.key === " ") cycleFilter(1);
-});
 
 // ---------------------------------------------------------------------
 // Views — FIELD (the network) and INDEX (the same live data as a text
-// hierarchy). Switched by clicking a tab or a mostly-horizontal scroll
-// gesture anywhere over the views area (a normal vertical scroll inside
-// the Index list is untouched, since only deltaX drives this).
+// hierarchy). There's no control ribbon or tab bar anymore — the scroll
+// wheel does the switching, with a small pair of position dots (bottom
+// center) as the only persistent, always-clickable fallback.
+//
+// Over FIELD, any deliberate scroll moves to INDEX (nothing else on that
+// view consumes scroll). Inside INDEX, scrolling behaves like a normal
+// list — it only falls through to a view-switch when you're already
+// scrolled to the very top and scroll up again, the same "overscroll"
+// pattern many two-section sites use, so reading a long list is never
+// interrupted by an accidental flip back to FIELD.
+//
+// INDEX is locked until there's enough live data for its "top events"
+// summary to say something real — see indexReady, set from the frame
+// loop — so nobody scrolls into an empty, uninteresting page.
 // ---------------------------------------------------------------------
 const viewsEl = document.getElementById("views");
 const viewEls = { field: document.getElementById("view-field"), index: document.getElementById("view-index") };
-const tabEls = { field: document.getElementById("tab-field"), index: document.getElementById("tab-index") };
+const dotEls = { field: document.getElementById("dot-field"), index: document.getElementById("dot-index") };
 let currentView = "field";
+let indexReady = false; // one-way latch — see computeIndexReady() in the frame loop
 
 function setView(view) {
   if (view === currentView) return;
   currentView = view;
   for (const key of Object.keys(viewEls)) {
     viewEls[key].classList.toggle("is-active", key === view);
-    tabEls[key].classList.toggle("is-active", key === view);
-    tabEls[key].setAttribute("aria-selected", String(key === view));
+    dotEls[key].classList.toggle("is-active", key === view);
   }
   if (view === "index") renderIndex(); // jump straight to fresh content, not last frame's
 }
 
-tabEls.field.addEventListener("click", () => setView("field"));
-tabEls.index.addEventListener("click", () => setView("index"));
+function attemptSwitchToIndex() {
+  if (!indexReady) {
+    showToast("GATHERING DATA — NOT ENOUGH SIGNAL YET");
+    return;
+  }
+  setView("index");
+}
+
+dotEls.field.addEventListener("click", () => setView("field"));
+dotEls.index.addEventListener("click", attemptSwitchToIndex);
 
 let viewSwitchAccum = 0; // debounce: one switch per gesture, not one per wheel event
 viewsEl.addEventListener(
   "wheel",
   (e) => {
-    if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return; // vertical — leave it to the child (e.g. Index scroll)
     const now = performance.now();
-    if (now - viewSwitchAccum < 400) return;
-    viewSwitchAccum = now;
-    setView(e.deltaX > 0 ? "index" : "field");
+    if (now - viewSwitchAccum < 450) return;
+
+    if (currentView === "field") {
+      const magnitude = Math.max(Math.abs(e.deltaX), Math.abs(e.deltaY));
+      if (magnitude < 4) return;
+      if (e.deltaX > 0 || e.deltaY > 0) {
+        viewSwitchAccum = now;
+        attemptSwitchToIndex();
+      }
+      // scrolling "up/back" while already on FIELD has nowhere to go
+      return;
+    }
+
+    // on INDEX: a horizontal swipe is always a fast path back to FIELD;
+    // a vertical scroll only falls through once already at the top of
+    // the list, so normal list-scrolling is never interrupted
+    if (Math.abs(e.deltaX) > Math.abs(e.deltaY) && Math.abs(e.deltaX) > 4) {
+      viewSwitchAccum = now;
+      setView("field");
+      return;
+    }
+    if (e.deltaY < 0 && indexWrapEl.scrollTop <= 0) {
+      viewSwitchAccum = now;
+      setView("field");
+    }
   },
   { passive: true }
 );
 
 // ---------------------------------------------------------------------
-// Index view — the same live nodes/clusters as a text hierarchy: group ->
-// topic cluster -> articles, with a PATTERN ENGINE insight per cluster.
-// Rebuilt periodically (not every frame — this is DOM, not canvas) from
-// main.js's frame loop, and only while the Index tab is actually visible.
+// Index view — the same live nodes/clusters as a text hierarchy: a "top
+// events" digest first (the most significant active clusters, each with
+// its Pattern Engine explanation), then the full group -> topic cluster
+// -> articles breakdown. Rebuilt periodically (not every frame — this is
+// DOM, not canvas) from main.js's frame loop, and only while visible.
 // ---------------------------------------------------------------------
+const indexTopEl = document.getElementById("index-top");
 const indexListEl = document.getElementById("index-list");
-const indexWrapEl = document.querySelector(".index-wrap");
+const indexWrapEl = document.getElementById("index-wrap");
 const GROUP_ORDER = ["SCI_TECH", "GEO_NATURE", "ARTS_CULTURE", "PUBLIC_LIFE", "OTHER"];
 
 function escapeHtml(s) {
   return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 }
 
+// Ranks currently-active named clusters and returns the ones confident
+// enough to explain — used both to render the top-of-page digest and to
+// decide whether INDEX is even worth showing yet (see computeIndexReady).
+function topConfidentClusters(limit) {
+  const named = store.getClusters().filter((c) => c.members.length >= 3);
+  return named
+    .map((cluster) => ({ cluster, insight: generateClusterInsight(cluster) }))
+    .filter(({ insight }) => insight.confidence !== "PATTERN: INSUFFICIENT SIGNAL")
+    .sort((a, b) => b.cluster.members.length - a.cluster.members.length)
+    .slice(0, limit);
+}
+
+function renderIndexTop() {
+  const ranked = topConfidentClusters(3);
+  if (!ranked.length) {
+    indexTopEl.innerHTML = "";
+    return;
+  }
+  let html = `<div class="index-top">
+    <div class="index-top__label">TOP EVENTS RIGHT NOW — AND WHY THEY'RE ACTIVE</div>`;
+  for (const { cluster, insight } of ranked) {
+    html += `<div class="index-top__item">
+      <div class="index-top__header">
+        <span class="index-top__name">${escapeHtml(cluster.label.toUpperCase())}</span>
+        <span class="index-top__count">${cluster.members.length} ARTICLES</span>
+      </div>
+      <div class="index-top__text">${escapeHtml(insight.text)}<span class="index-top__byline">— ${insight.byline} · ${insight.confidence}</span></div>
+    </div>`;
+  }
+  html += `</div>`;
+  indexTopEl.innerHTML = html;
+}
+
 function renderIndex() {
+  renderIndexTop();
+
   const nodes = store.getNodes();
   if (!nodes.length) {
     indexListEl.innerHTML = `<div class="index-empty">WAITING FOR LIVE ACTIVITY —</div>`;
@@ -486,7 +455,7 @@ connectStream({
     dom.liveLabel.textContent = "RECONNECTING";
   },
   onEdit: (edit) => {
-    store.registerEdit(edit, gain);
+    store.registerEdit(edit, GAIN);
   },
 });
 
@@ -508,6 +477,7 @@ setInterval(updateClock, 1000);
 // Main loop
 // ---------------------------------------------------------------------
 let lastTime = performance.now();
+let indexReadyCheckAccum = 0;
 
 function frame(now) {
   const dt = Math.min(0.05, (now - lastTime) / 1000);
@@ -553,20 +523,7 @@ function frame(now) {
       ? "pointer"
       : "default";
 
-  // the readout counts every article the system is actually tracking,
-  // including ones currently merged into a collapsed cluster shape
-  const count = store.getNodes().length;
-  dom.nodeCount.textContent = String(count).padStart(3, "0");
-  dom.nodeFill.style.width = `${Math.min(100, (count / 60) * 100)}%`;
-
-  const linkCount = store.getLinks().length;
-  dom.linksCount.textContent = String(linkCount).padStart(3, "0");
-  dom.linksFill.style.width = `${Math.min(100, (linkCount / 30) * 100)}%`;
-
   const namedClusters = store.getClusters().filter((c) => c.members.length >= 3);
-  dom.clustersCount.textContent = String(namedClusters.length).padStart(3, "0");
-  dom.clustersFill.style.width = `${Math.min(100, (namedClusters.length / 8) * 100)}%`;
-
   if (namedClusters.length) {
     namedClusters.sort((a, b) => b.members.length - a.members.length);
     dom.focusValue.textContent = namedClusters[0].label.toUpperCase();
@@ -576,14 +533,20 @@ function frame(now) {
     dom.focusValue.classList.add("is-scanning");
   }
 
-  const eps = store.getEditsPerSecond();
-  dom.epsValue.textContent = eps.toFixed(1);
-  dom.epsFill.style.width = `${Math.min(100, (eps / 15) * 100)}%`;
-
-  const elapsed = Math.floor(store.getElapsedSeconds());
-  const mm = String(Math.floor(elapsed / 60)).padStart(2, "0");
-  const ss = String(elapsed % 60).padStart(2, "0");
-  dom.elapsedValue.textContent = `${mm}:${ss}`;
+  // INDEX unlocks once at least one active cluster has a confident
+  // (not "insufficient signal") Pattern Engine read — a one-way latch,
+  // checked on a slow interval rather than every frame since it recomputes
+  // insight text. Once unlocked it stays unlocked even if data thins out.
+  if (!indexReady) {
+    indexReadyCheckAccum += dt;
+    if (indexReadyCheckAccum > 1) {
+      indexReadyCheckAccum = 0;
+      if (topConfidentClusters(1).length > 0) {
+        indexReady = true;
+        dotEls.index.classList.remove("is-locked");
+      }
+    }
+  }
 
   // Index is DOM, not canvas — rebuild it on a slow interval, and only
   // while it's actually the visible view

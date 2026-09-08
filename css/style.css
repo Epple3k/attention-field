@@ -329,133 +329,71 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* ---------- Control bar (below header — replaces the old bottom footer) ---------- */
+/* ---------- View position dots + toast (replace the old control ribbon) ---------- */
 
-.controlbar {
+.view-dots {
+  position: fixed;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  z-index: 20;
   display: flex;
-  align-items: center;
-  padding: 10px 26px;
-  gap: 0;
-  border-bottom: 1px solid var(--line);
-  flex: 0 0 auto;
-  flex-wrap: wrap;
-  row-gap: 8px;
+  gap: 8px;
+  padding: 6px;
 }
 
-.ctrl {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  min-width: 92px;
-  padding: 0 16px;
-  border-left: 1px solid var(--line);
-}
-
-.ctrl:first-child {
-  border-left: none;
-  padding-left: 0;
-}
-
-.ctrl__label {
-  font-size: 9px;
-  letter-spacing: 0.14em;
-  color: var(--fg-dim);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.ctrl__hint {
-  font-size: 8px;
-  color: var(--fg-faint);
-  letter-spacing: 0.1em;
-}
-
-.ctrl--active .ctrl__label {
-  color: var(--accent);
-}
-
-.ctrl__value {
-  font-size: 15px;
-  font-weight: 500;
-  letter-spacing: 0.03em;
-  font-variant-numeric: tabular-nums;
-}
-
-.ctrl__bar {
-  width: 100%;
-  height: 2px;
-  background: var(--line);
-  position: relative;
-}
-
-.ctrl__bar-fill {
-  height: 100%;
+.view-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  border: none;
+  padding: 0;
   background: var(--fg-faint);
-  transition: width 0.15s ease-out;
-}
-
-.ctrl--active .ctrl__bar-fill {
-  background: var(--accent);
-}
-
-.ctrl--readout {
-  border-left: 1px solid var(--line);
-}
-
-.ctrl--clickable {
+  opacity: 0.5;
   cursor: pointer;
-  outline: none;
+  transition: opacity 0.2s ease, background 0.2s ease, transform 0.2s ease;
 }
 
-.ctrl--clickable:hover .ctrl__label,
-.ctrl--clickable:focus-visible .ctrl__label {
-  color: var(--accent);
+.view-dot:hover {
+  opacity: 0.9;
 }
 
-.ctrl__value.is-changed {
-  animation: value-flash 0.3s ease-out;
-}
-
-@keyframes value-flash {
-  0% { color: var(--accent); }
-  100% { color: var(--fg); }
-}
-
-.view-tabs {
-  display: flex;
-  gap: 2px;
-  margin-left: auto;
-  padding-left: 16px;
-}
-
-.view-tab {
-  font-family: var(--mono);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.12em;
-  color: var(--fg-dim);
-  background: none;
-  border: 1px solid var(--line);
-  padding: 7px 14px;
-  cursor: pointer;
-}
-
-.view-tab + .view-tab {
-  border-left: none;
-}
-
-.view-tab:hover {
-  color: var(--fg);
-}
-
-.view-tab.is-active {
-  color: var(--panel-ink);
+.view-dot.is-active {
   background: var(--fg);
-  border-color: var(--fg);
+  opacity: 1;
+  transform: scale(1.3);
 }
 
-/* ---------- Views (Field / Index), switched by tab click or horizontal scroll ---------- */
+.view-dot.is-locked {
+  cursor: not-allowed;
+}
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 40px;
+  transform: translateX(-50%) translateY(6px);
+  z-index: 21;
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  color: var(--panel-ink);
+  background: var(--panel-bg);
+  padding: 9px 16px;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+.toast.is-visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* ---------- Views (Field / Index) — switched with the scroll wheel: over
+   the field, any deliberate scroll moves to Index; inside Index, scrolling
+   its list behaves normally until you're already at the top and scroll up
+   again, which returns to Field ---------- */
 
 .views {
   position: relative;
@@ -555,6 +493,63 @@ body {
   height: 100%;
   overflow-y: auto;
   padding: 28px 8vw 60px;
+}
+
+.index-top {
+  margin-bottom: 34px;
+}
+
+.index-top__label {
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  color: var(--fg-faint);
+  margin-bottom: 12px;
+}
+
+.index-top__item {
+  padding: 16px 18px;
+  background: var(--panel-bg);
+  color: var(--panel-ink);
+  margin-bottom: 10px;
+}
+
+.index-top__item:last-child {
+  margin-bottom: 0;
+}
+
+.index-top__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.index-top__name {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+
+.index-top__count {
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  color: color-mix(in srgb, var(--panel-ink) 60%, transparent);
+  white-space: nowrap;
+}
+
+.index-top__text {
+  font-size: 11.5px;
+  line-height: 1.65;
+  max-width: 68ch;
+}
+
+.index-top__byline {
+  display: block;
+  margin-top: 8px;
+  font-size: 8.5px;
+  letter-spacing: 0.14em;
+  color: color-mix(in srgb, var(--panel-ink) 55%, transparent);
 }
 
 .index-header {
@@ -690,18 +685,6 @@ body {
 }
 
 @media (max-width: 860px) {
-  .controlbar {
-    row-gap: 10px;
-  }
-  .ctrl {
-    min-width: 78px;
-  }
-  .view-tabs {
-    margin-left: 0;
-    padding-left: 0;
-    width: 100%;
-    order: 99;
-  }
   .index-wrap {
     padding: 22px 5vw 50px;
   }

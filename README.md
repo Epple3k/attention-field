@@ -134,11 +134,21 @@ endpoint from the browser — no backend required.
 
 ## Interaction
 
-- **Scroll / trackpad wheel** over the field adjusts **GAIN** — how strongly
-  each incoming edit affects the visualization.
-- **Scroll or click** RANGE, MODE, or FILTER in the control bar (directly
-  below the header — there's no bottom footer anymore) to step through
-  their values, like a selector switch on an instrument.
+There is no control ribbon, tab bar, or footer — the earlier
+RANGE/GAIN/MODE/FILTER instrument strip was removed entirely in favor of a
+plainer interface where the scroll wheel does the one piece of navigation
+this app actually needs (switching views) and everything else happens by
+pointing at the thing you're curious about:
+
+- **Scroll** anywhere to move between **FIELD** and **INDEX** — the same
+  live data, shown two ways. Scrolling down/right over the field moves to
+  Index; inside Index, normal list-scrolling is untouched, and only
+  scrolling up again once you're already at the very top returns to the
+  field (the same "overscroll chains to the next section" pattern many
+  two-panel sites use, so reading a long list is never interrupted by an
+  accidental flip). A small pair of dots at the bottom center shows which
+  view is active and is always clickable directly, if you'd rather not use
+  the wheel.
 - **Hover** a node for its context summary — title plus a plain-language
   explanation, in a large, high-contrast backed panel, not small text
   floating loose. Hovering also stabilizes that node (and its direct
@@ -150,31 +160,15 @@ endpoint from the browser — no backend required.
   the two articles are connected; **click** to pin that focus open.
 - **Hover** a merged cluster shape for a preview of its members; **click**
   to open it into individual nodes.
-- **Click the INDEX tab**, or scroll horizontally over the field (a
-  trackpad two-finger swipe, shift+wheel, or a mouse's tilt-wheel), to
-  switch to the Index — the same live data as a scrollable text hierarchy.
-  See Index view, below.
 
-### RANGE, MODE, FILTER
-
-- **RANGE** (1M / 5M / 15M / 1H) sets the field's memory span. It controls
-  both how long a node's activity lingers before decaying (short range =
-  snappy and immediate, long range = slow and settled) and the window used
-  to count each node's recent edits.
-- **MODE** switches the lens on that same data: **ACTIVITY** shows the
-  instantaneous pulse of what's happening right now; **VOLUME** sizes nodes
-  by accumulated edit count within the current RANGE, giving a steadier,
-  longer-term read on which articles are under sustained attention rather
-  than a single momentary spike.
-- **FILTER** (ALL / NEW / MAJOR / MINOR) gates which incoming edits are
-  allowed to register at all — NEW shows only page creations, MAJOR only
-  substantial rewrites (±500 characters), MINOR only edits flagged minor by
-  the editor.
-
-There's no historical Wikipedia API involved in RANGE/MODE — "long-term"
-here means accumulated *within this browser session*, since that's the only
-history the live stream itself provides. A true 24h view would require
-pulling in the Pageviews API (see Second iteration, below).
+RANGE (memory span), MODE (activity vs. volume sizing), and FILTER (which
+edit types register at all) still exist as real, load-bearing parameters
+inside `articleStore.js` — they didn't get deleted, just the UI for
+adjusting them, which now just runs on sensible fixed defaults (15-minute
+range, activity mode, no filter). Same for GAIN: every edit affects the
+field at a fixed, unity value rather than a viewer-adjustable one. The
+tradeoff was deliberate — a cleaner, quieter interface over a
+demonstrably-real but rarely-touched set of knobs.
 
 ### Two kinds of connection
 
@@ -450,23 +444,44 @@ heuristic guess at *why*.
 
 A second, full view of the same live data — not a different dataset, the
 same store, presented as a scrollable text hierarchy instead of a physical
-field. Reach it by clicking the **INDEX** tab next to the control bar, or
-by scrolling horizontally anywhere over the field (a trackpad two-finger
-swipe, shift+wheel, or a mouse's horizontal/tilt wheel — checked via the
-wheel event's `deltaX`, so it doesn't compete with GAIN's vertical scroll
-or the Index list's own normal vertical scrolling).
+field. Reached by scrolling (see Interaction, above) or clicking the
+position dots.
 
-Structure: **topic group → topic cluster → articles**, in that order —
-the same four coarse groups as the field's node coloring, then within each
-group the same specific-category clusters as the field's merged shapes
-(3+ members), then individual articles sorted by edit count, with anything
-not yet in a named cluster listed separately under "Ungrouped." It rebuilds
-from the live store every ~1.5s while visible (DOM writes are far more
-expensive than canvas redraws, so it doesn't run every frame, and it
-doesn't run at all while the Field tab is the one showing), preserves
-scroll position across rebuilds, and clicking any article opens it on
-Wikipedia — the same information as the field, organized for reading
-instead of watching.
+### Locked until there's something to say
+
+The Index doesn't unlock the moment the page loads — it stays locked
+(the index dot dimmed and inert, a brief toast on a blocked scroll
+attempt: "GATHERING DATA — NOT ENOUGH SIGNAL YET") until at least one
+active topic cluster has produced a genuinely confident Pattern Engine
+read, not just "insufficient signal." In practice that's usually well
+under a minute of live traffic, but the point isn't speed — it's that an
+empty or uninformative Index would undercut the thing the view exists to
+do. This is a one-way latch (`main.js`'s `indexReady`, checked on a slow
+interval since it means recomputing insight text): once real signal has
+shown up once, the view stays unlocked even if things go quiet again.
+
+### Top events, and why they're active
+
+The Index doesn't lead with the full group/cluster/article breakdown —
+it leads with a short digest: the two or three most significant active
+clusters right now (ranked by member count, filtered to only the ones
+the Pattern Engine is actually confident about), each shown with its full
+explanation up front, before any scrolling into the categorized list
+below. This is the same per-cluster insight the rest of the Index shows
+deeper down — promoted to a headline for whatever's most significant
+*globally*, across every topic group, rather than requiring you to know
+which group to look in first.
+
+Below that digest, the full structure is **topic group → topic cluster →
+articles**, in that order — the same four coarse groups as the field's
+node coloring, then within each group the same specific-category clusters
+as the field's merged shapes (3+ members), then individual articles
+sorted by edit count, with anything not yet in a named cluster listed
+separately under "Ungrouped." It rebuilds from the live store every ~1.5s
+while visible (DOM writes are far more expensive than canvas redraws, so
+it doesn't run every frame, and doesn't run at all while Field is the one
+showing), and preserves scroll position across rebuilds. Clicking any
+article opens it on Wikipedia.
 
 ### Pattern Engine
 
@@ -552,17 +567,22 @@ Index view.
 ## Status
 
 Live connection, ~60 concurrent article nodes, pulse-on-edit, decay-when-idle,
-a wheel-controlled GAIN, functional RANGE/MODE/FILTER in a compact control
-bar, real Wikipedia-category topic clustering with a live hull boundary
-(no glow anywhere in the app), a damped soft-collision spring/repulsion/
-centering physics model with per-node hover stabilization (see Physics)
-with draggable nodes and interactive association ties (hover for a large,
+real Wikipedia-category topic clustering with a live hull boundary (no glow
+anywhere in the app), a damped soft-collision spring/repulsion/centering
+physics model with per-node hover stabilization (see Physics) with
+draggable nodes and interactive association ties (hover for a large,
 legible explanation panel, click to pin), merged/collapsible cluster
 shapes with real burst-and-resettle physics, same-editor event links,
 high-level topic-group color coding with a legend, a synthesis-level FOCUS
-readout, a full second Index view of the same live data as a text
-hierarchy with a from-scratch Pattern Engine generating a "why is this
-active" narrative per cluster, and a light/near-black visual identity
-(re-validated for contrast and colorblind safety on the new surface) are
-in place. Pageview context (for genuine 24h history), trails, sound, and a
-richer article-inspection panel remain planned second-iteration additions.
+readout, a scroll-wheel-driven second Index view of the same live data
+gated behind a real data-sufficiency check, with a top-of-page "top
+events" digest and a from-scratch Pattern Engine generating a "why is
+this active" narrative per cluster, a light/near-black visual identity
+(re-validated for contrast and colorblind safety on the new surface), a
+logo-bearing first-visit intro overlay, and a case study for employers are
+in place. The earlier RANGE/GAIN/MODE/FILTER instrument ribbon was
+deliberately removed for a plainer interface — those parameters still
+exist and still matter internally, just fixed at sensible defaults rather
+than user-adjustable. Pageview context (for genuine 24h history), trails,
+sound, and a richer article-inspection panel remain planned
+second-iteration additions.
