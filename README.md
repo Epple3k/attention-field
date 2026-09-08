@@ -79,13 +79,20 @@ into a single object — a regular polygon whose side count equals its member
 count, so a hexagon really is "6 articles fused into one." Individual dots
 stop being drawn; the shape's own fill/stroke brightens with its members'
 combined live activity, so a burst of edits happening *inside* it is still
-visible as one aggregated pulse. **Hover** it to preview a few member
-titles; **click** it to expand — members physically fly back apart to their
-own positions and become individually visible and clickable again. Click
-the expanded halo again to re-collapse. This is the field's actual
-synthesis mechanic: once there's enough evidence for a topic, the field
-stops showing you N separate things and shows you one thing, with the
-individual evidence still one click away.
+visible as one aggregated pulse. Nothing else in the field dims or greys
+out when this happens — it's one new object appearing, not a modal state.
+
+**Hover** it — the shape lifts slightly and gains an outer ring, and a
+preview of a few member titles appears beneath it. **Click** it to expand:
+members get a real outward velocity kick and physically shove aside
+whatever else is nearby, the way an edit pulse displaces its neighbors,
+then settle into their own positions as individually visible, clickable
+nodes again. To close it, **click anywhere outside its boundary** — same
+as dismissing a popover; clicking among its own members (or on one, to open
+it) leaves it open. This is the field's actual synthesis mechanic: once
+there's enough evidence for a topic, the field stops showing you N separate
+things and shows you one thing, with the individual evidence still one
+click away.
 
 Verified end-to-end against the live API (Node, no browser): four articles
 known to share `Category:Programming languages`-adjacent categories

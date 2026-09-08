@@ -86,8 +86,52 @@ export class ArticleStore {
    * one the viewer previously opened. Keyed by label since cluster
    * membership objects are rebuilt on every recompute. */
   toggleClusterExpanded(label) {
-    if (this._expandedLabels.has(label)) this._expandedLabels.delete(label);
-    else this._expandedLabels.add(label);
+    if (this._expandedLabels.has(label)) this.collapseCluster(label);
+    else this.expandCluster(label);
+  }
+
+  expandCluster(label) {
+    if (this._expandedLabels.has(label)) return;
+    this._expandedLabels.add(label);
+    this._burstCluster(label);
+  }
+
+  collapseCluster(label) {
+    this._expandedLabels.delete(label);
+  }
+
+  getExpandedClusters() {
+    return this.clusters.filter((c) => c.expanded);
+  }
+
+  // A one-time outward kick applied at the instant a cluster opens, plus a
+  // shove against whatever else is nearby — this is what makes expanding
+  // read as a real physical event (members bursting out, the surrounding
+  // field flinching away) rather than members quietly drifting apart.
+  _burstCluster(label) {
+    const cluster = this.clusters.find((c) => c.label === label);
+    if (!cluster) return;
+    const members = cluster.members;
+    let cx = 0;
+    let cy = 0;
+    for (const m of members) {
+      cx += m.x;
+      cy += m.y;
+    }
+    cx /= members.length;
+    cy /= members.length;
+
+    const allNodes = [...this.nodes.values()];
+    const burstForce = 220 + members.length * 14;
+    members.forEach((m, i) => {
+      const dx = m.x - cx;
+      const dy = m.y - cy;
+      const dist = Math.hypot(dx, dy);
+      const angle = dist > 2 ? Math.atan2(dy, dx) : (i / members.length) * Math.PI * 2;
+      m.vx += Math.cos(angle) * burstForce;
+      m.vy += Math.sin(angle) * burstForce;
+      displaceNeighbors(allNodes, m, 1.5);
+    });
   }
 
   get rangeSeconds() {

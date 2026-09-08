@@ -167,11 +167,22 @@ export class Renderer {
     const n = cluster.members.length;
     const sides = Math.max(3, Math.min(12, n));
     const heat = cluster.members.reduce((s, m) => s + m.heat, 0) / n;
-    const r = this._clusterShapeRadius(n);
     const isHover = this.hoverCluster === cluster;
+    // hover "lifts" the shape slightly larger, on top of its normal size —
+    // meant to be an unmistakable response, not a subtle tint shift
+    const r = this._clusterShapeRadius(n) * (isHover ? 1.12 : 1);
     const rotation = (performance.now() / 1000) * (0.06 + heat * 0.5);
 
     ctx.save();
+
+    if (isHover) {
+      ctx.beginPath();
+      ctx.arc(cx, cy, r + 10, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(${COLOR_ACCENT}, 0.55)`;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+
     ctx.beginPath();
     for (let i = 0; i < sides; i++) {
       const angle = rotation + (i / sides) * Math.PI * 2;
@@ -183,22 +194,22 @@ export class Renderer {
     ctx.closePath();
 
     const hotColor = heat > 0.12 || isHover;
-    const fillAlpha = 0.05 + heat * 0.1 + (isHover ? 0.03 : 0);
+    const fillAlpha = 0.05 + heat * 0.1 + (isHover ? 0.08 : 0);
     ctx.fillStyle = `rgba(${hotColor ? COLOR_ACCENT : COLOR_FG_RGB}, ${fillAlpha})`;
     ctx.fill();
 
-    ctx.strokeStyle = `rgba(${hotColor ? COLOR_ACCENT : COLOR_FG_RGB}, ${isHover ? 0.9 : 0.4 + heat * 0.4})`;
-    ctx.lineWidth = isHover ? 1.6 : 1.1;
+    ctx.strokeStyle = `rgba(${hotColor ? COLOR_ACCENT : COLOR_FG_RGB}, ${isHover ? 1 : 0.4 + heat * 0.4})`;
+    ctx.lineWidth = isHover ? 1.8 : 1.1;
     ctx.stroke();
 
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.font = `600 12px "IBM Plex Mono", monospace`;
-    ctx.fillStyle = `rgba(${COLOR_FG_RGB}, 0.9)`;
+    ctx.font = `600 ${isHover ? 13 : 12}px "IBM Plex Mono", monospace`;
+    ctx.fillStyle = `rgba(${COLOR_FG_RGB}, ${isHover ? 1 : 0.9})`;
     ctx.fillText(cluster.label.toUpperCase(), cx, cy - 5);
 
     ctx.font = `400 9px "IBM Plex Mono", monospace`;
-    ctx.fillStyle = `rgba(${COLOR_DIM}, 0.85)`;
+    ctx.fillStyle = isHover ? `rgba(${COLOR_ACCENT}, 0.95)` : `rgba(${COLOR_DIM}, 0.85)`;
     ctx.fillText(`${n} ARTICLES — CLICK TO EXPAND`, cx, cy + 10);
 
     if (isHover) {
@@ -209,7 +220,7 @@ export class Renderer {
       const more = n > 3 ? ` +${n - 3} more` : "";
       ctx.font = `400 8px "IBM Plex Mono", monospace`;
       ctx.fillStyle = `rgba(${COLOR_DIM}, 0.9)`;
-      ctx.fillText(preview + more, cx, cy + r + 15);
+      ctx.fillText(preview + more, cx, cy + r + 16);
     }
 
     ctx.restore();
@@ -389,7 +400,7 @@ export class Renderer {
       if (!cluster.collapsible) continue;
       const { cx, cy, maxR } = this._clusterCentroid(cluster);
       const testR = cluster.collapsed
-        ? this._clusterShapeRadius(cluster.members.length) + 6
+        ? this._clusterShapeRadius(cluster.members.length) + 16
         : maxR + 36;
       const d = Math.hypot(cx - x, cy - y);
       if (d <= testR && d < closestDist) {
@@ -398,5 +409,18 @@ export class Renderer {
       }
     }
     return closest;
+  }
+
+  // "Click outside to dismiss": true if the point falls within any
+  // currently expanded cluster's boundary (its halo region) — used so a
+  // click elsewhere in the field, but not a click among an expanded
+  // cluster's own members, is what re-collapses it.
+  isInsideExpandedCluster(x, y, clusters) {
+    for (const cluster of clusters) {
+      if (!cluster.expanded) continue;
+      const { cx, cy, maxR } = this._clusterCentroid(cluster);
+      if (Math.hypot(cx - x, cy - y) <= maxR + 36) return true;
+    }
+    return false;
   }
 }

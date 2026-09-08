@@ -150,10 +150,15 @@ window.addEventListener("resize", resize);
 resize();
 
 // ---------------------------------------------------------------------
-// Hover / click — individual nodes open their Wikipedia article; a
-// collapsible cluster's merged shape (or its halo, once expanded) toggles
-// between "one shape" and "its individual nodes." Node hover always wins
-// over cluster hover so members stay reachable inside an expanded cluster.
+// Hover / click.
+// - Hovering an individual node highlights it; clicking it opens the
+//   article. Node hover always wins over cluster hover so members stay
+//   reachable inside an expanded cluster.
+// - Clicking a collapsed cluster's merged shape opens it — members burst
+//   outward to their own positions.
+// - An expanded cluster closes by clicking *outside* its boundary
+//   (anywhere in the field that isn't among its own members) — clicking
+//   inside that boundary, or on one of its nodes, leaves it open.
 // ---------------------------------------------------------------------
 let pointer = null;
 canvas.addEventListener("mousemove", (e) => {
@@ -166,10 +171,23 @@ canvas.addEventListener("mouseleave", () => {
   renderer.hoverCluster = null;
 });
 canvas.addEventListener("click", () => {
+  if (!pointer) return;
+
   if (renderer.hoverNode) {
     window.open(renderer.hoverNode.url, "_blank", "noopener");
-  } else if (renderer.hoverCluster) {
-    store.toggleClusterExpanded(renderer.hoverCluster.label);
+    return;
+  }
+
+  if (renderer.hoverCluster && renderer.hoverCluster.collapsed) {
+    store.expandCluster(renderer.hoverCluster.label);
+    return;
+  }
+
+  const clusters = store.getClusters();
+  if (!renderer.isInsideExpandedCluster(pointer.x, pointer.y, clusters)) {
+    for (const c of clusters) {
+      if (c.expanded) store.collapseCluster(c.label);
+    }
   }
 });
 
