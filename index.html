@@ -17,6 +17,10 @@
       <div class="hud__title">ATTENTION FIELD</div>
       <div class="hud__sub" id="date-readout">— — —</div>
     </div>
+    <div class="hud__focus">
+      <div class="hud__focus-label">FOCUS</div>
+      <div class="hud__focus-value" id="focus-value">SCANNING</div>
+    </div>
     <div class="hud__block hud__block--right">
       <div class="hud__live">
         <span class="hud__dot" id="live-dot"></span>
@@ -28,7 +32,10 @@
 
   <main class="field-wrap">
     <canvas id="field"></canvas>
-    <div class="field__caption">LIVE DATA FIELD — EN.WIKIPEDIA.ORG<br /><span class="field__caption-sub">LINES — SAME EDITOR, WITHIN 90S</span></div>
+    <div class="field__caption">
+      LIVE DATA FIELD — EN.WIKIPEDIA.ORG<br />
+      <span class="field__caption-sub">NEUTRAL LINES — SHARED CATEGORY · ORANGE PULSE — SAME EDITOR, 90S</span>
+    </div>
   </main>
 
   <footer class="hud hud--bottom">
@@ -56,6 +63,11 @@
       <div class="ctrl__label">NODES</div>
       <div class="ctrl__value" id="node-count">000</div>
       <div class="ctrl__bar" aria-hidden="true"><div class="ctrl__bar-fill" id="node-fill" style="width:0%"></div></div>
+    </div>
+    <div class="ctrl ctrl--readout">
+      <div class="ctrl__label">CLUSTERS</div>
+      <div class="ctrl__value" id="clusters-count">000</div>
+      <div class="ctrl__bar" aria-hidden="true"><div class="ctrl__bar-fill" id="clusters-fill" style="width:0%"></div></div>
     </div>
     <div class="ctrl ctrl--readout">
       <div class="ctrl__label">LINKS</div>

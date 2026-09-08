@@ -51,25 +51,52 @@ here means accumulated *within this browser session*, since that's the only
 history the live stream itself provides. A true 24h view would require
 pulling in the Pageviews API (see Second iteration, below).
 
-### Association lines
+### Two kinds of connection
 
-When the same editor touches two different articles within 90 seconds, a
-thin line is drawn between their nodes with a traveling pulse — real,
-verifiable connective tissue in the data (a template rollout, someone
-following a thread across pages, a coordinated topic sweep), not an inferred
-or decorative one. Linked nodes also drift gently toward each other while
-the link is fresh, standing in for topic clustering without needing external
-semantic data.
+The field draws two visually distinct relationships, and only one of them
+ever uses the accent color — orange is reserved strictly for *live signal*,
+neutral warm-white for *static structure*:
+
+- **Topic clusters (neutral, persistent).** Each active article's real
+  Wikipedia categories are fetched live
+  (`js/categoryService.js`, via the public `action=query&prop=categories`
+  API) and administrative/maintenance categories are filtered out. Any two
+  articles that genuinely share a category are connected by a thin neutral
+  line and drawn physically toward each other; connected components of 3+
+  articles get a soft halo and a label — the actual shared category name,
+  e.g. `MACHINE LEARNING` — floated over the group. This is the field's real
+  topic-clustering mechanism: grounded in Wikipedia's own taxonomy, not an
+  inferred or invented similarity score.
+- **Event links (orange, transient).** When the same editor touches two
+  different articles within 90 seconds, a fading line with a traveling pulse
+  connects them — evidence of coordinated behavior (a template rollout,
+  someone following a thread across pages) happening right now.
+
+### Synthesis layer
+
+Three things read the field's current topology back to you, so it's never
+just a set of independent, labeled dots:
+
+- **FOCUS**, top-center of the header — the label of whatever cluster
+  currently has the most members: a one-line, live "what's going on."
+- **CLUSTERS**, in the footer — how many named topic groups (3+ articles)
+  exist right now.
+- **Ambient field glow** — a very soft background wash whose intensity
+  tracks smoothed edits/second, so the whole canvas visibly breathes with
+  aggregate Wikipedia throughput, not just individual nodes.
 
 ## Architecture
 
 ```
 EventStream (js/eventStream.js)
      ↓
-Article State Store (js/articleStore.js)  ← RANGE / MODE / FILTER state,
-     ↓                                       edit history, editor links
-Physics (js/physics.js)
+Category Service (js/categoryService.js) ← live Wikipedia category lookups
      ↓
+Article State Store (js/articleStore.js)  ← RANGE / MODE / FILTER state,
+     ↓                                       edit history, clustering,
+     ↓                                       event links, field energy
+Physics (js/physics.js)                   ← repulsion, topic-cluster springs,
+     ↓                                       event-link springs
 Renderer (js/renderer.js)
      ↓
 main.js — wiring, HUD, input
@@ -81,7 +108,9 @@ HTML/CSS/JS with a `<canvas>` field.
 ## Status
 
 Live connection, ~60 concurrent article nodes, pulse-on-edit, decay-when-idle,
-a wheel-controlled GAIN, functional RANGE/MODE/FILTER, same-editor
-association links, and the core visual identity are in place. Pageview
-context (for genuine 24h history), trails, sound, and deeper article
-inspection remain planned second-iteration additions.
+a wheel-controlled GAIN, functional RANGE/MODE/FILTER, real Wikipedia-category
+topic clustering with cluster halos/labels, same-editor event links, a
+synthesis-level FOCUS readout, ambient field-energy glow, and the core visual
+identity are in place. Pageview context (for genuine 24h history), trails,
+sound, and deeper article inspection remain planned second-iteration
+additions.

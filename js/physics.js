@@ -8,6 +8,7 @@ const DAMPING = 0.90;
 const JITTER = 5.5;
 const MAX_SPEED = 60;
 const LINK_STRENGTH = 26;
+const TOPIC_STRENGTH = 16;
 
 export function stepPhysics(nodes, bounds, dt) {
   const n = nodes.length;
@@ -69,10 +70,9 @@ export function stepPhysics(nodes, bounds, dt) {
   }
 }
 
-/** Nodes linked by a shared recent editor drift gently toward each other
- * while the link is fresh — the field's stand-in for topic clustering,
- * grounded in an actual shared-authorship signal rather than inferred
- * similarity. Force fades to zero as the link ages out. */
+/** Nodes touched by a shared recent editor drift gently toward each other
+ * while the event link is fresh — a behavioral signal (this happened),
+ * not a topical one. Force fades to zero as the link ages out. */
 export function applyLinkForces(links, dt) {
   for (const link of links) {
     const t = link.age / link.life;
@@ -85,6 +85,30 @@ export function applyLinkForces(links, dt) {
     const minDist = a.radius + b.radius + 70;
     if (dist <= minDist) continue;
     const force = LINK_STRENGTH * (1 - t) * dt;
+    const fx = (dx / dist) * force;
+    const fy = (dy / dist) * force;
+    a.vx += fx;
+    a.vy += fy;
+    b.vx -= fx;
+    b.vy -= fy;
+  }
+}
+
+/** Nodes that genuinely share a Wikipedia category pull toward each other
+ * continuously, for as long as that structural relationship holds — this
+ * is what actually produces topic clusters in the field, rather than a
+ * transient nudge. Weaker than the event link so live activity can still
+ * displace things locally. */
+export function applyTopicForces(links, dt) {
+  for (const link of links) {
+    const a = link.a;
+    const b = link.b;
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const dist = Math.hypot(dx, dy) || 1;
+    const minDist = a.radius + b.radius + 50;
+    if (dist <= minDist) continue;
+    const force = TOPIC_STRENGTH * dt;
     const fx = (dx / dist) * force;
     const fy = (dy / dist) * force;
     a.vx += fx;

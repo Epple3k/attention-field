@@ -25,11 +25,14 @@ const dom = {
   filterFill: document.getElementById("filter-fill"),
   nodeCount: document.getElementById("node-count"),
   nodeFill: document.getElementById("node-fill"),
+  clustersCount: document.getElementById("clusters-count"),
+  clustersFill: document.getElementById("clusters-fill"),
   linksCount: document.getElementById("links-count"),
   linksFill: document.getElementById("links-fill"),
   epsValue: document.getElementById("eps-value"),
   epsFill: document.getElementById("eps-fill"),
   elapsedValue: document.getElementById("elapsed-value"),
+  focusValue: document.getElementById("focus-value"),
 };
 
 function flash(el) {
@@ -215,6 +218,19 @@ function frame(now) {
   const linkCount = store.getLinks().length;
   dom.linksCount.textContent = String(linkCount).padStart(3, "0");
   dom.linksFill.style.width = `${Math.min(100, (linkCount / 30) * 100)}%`;
+
+  const namedClusters = store.getClusters().filter((c) => c.members.length >= 3);
+  dom.clustersCount.textContent = String(namedClusters.length).padStart(3, "0");
+  dom.clustersFill.style.width = `${Math.min(100, (namedClusters.length / 8) * 100)}%`;
+
+  if (namedClusters.length) {
+    namedClusters.sort((a, b) => b.members.length - a.members.length);
+    dom.focusValue.textContent = namedClusters[0].label.toUpperCase();
+    dom.focusValue.classList.remove("is-scanning");
+  } else {
+    dom.focusValue.textContent = "SCANNING";
+    dom.focusValue.classList.add("is-scanning");
+  }
 
   const eps = store.getEditsPerSecond();
   dom.epsValue.textContent = eps.toFixed(1);

@@ -42,6 +42,52 @@ body {
   flex: 0 0 auto;
 }
 
+.hud--top {
+  position: relative;
+}
+
+.hud__focus {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  pointer-events: none;
+  max-width: 42vw;
+}
+
+.hud__focus-label {
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  color: var(--fg-faint);
+}
+
+.hud__focus-value {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 42vw;
+  transition: opacity 0.5s ease;
+}
+
+.hud__focus-value.is-scanning {
+  color: var(--fg-faint);
+  font-weight: 500;
+}
+
+@media (max-width: 760px) {
+  .hud__focus {
+    display: none;
+  }
+}
+
 .hud--bottom {
   border-bottom: none;
   border-top: 1px solid var(--line);

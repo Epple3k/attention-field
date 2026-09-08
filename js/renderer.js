@@ -34,7 +34,13 @@ export class Renderer {
     const nodes = store.getNodes();
     const rings = store.getRings();
     const links = store.getLinks();
+    const topicLinks = store.getTopicLinks();
+    const clusters = store.getClusters();
+    const energy = store.getFieldEnergy();
 
+    this._drawAmbientGlow(energy);
+    for (const cluster of clusters) this._drawClusterHalo(cluster);
+    for (const tl of topicLinks) this._drawTopicLink(tl);
     for (const link of links) this._drawLink(link);
     for (const ring of rings) this._drawRing(ring);
 
@@ -42,7 +48,91 @@ export class Renderer {
     nodes.sort((a, b) => a.mass + a.heat - (b.mass + b.heat));
     for (const node of nodes) this._drawNode(node);
 
+    for (const cluster of clusters) this._drawClusterLabel(cluster);
+
     return nodes;
+  }
+
+  _drawAmbientGlow(energy) {
+    if (energy < 0.02) return;
+    const { ctx, width, height } = this;
+    const cx = width / 2;
+    const cy = height / 2;
+    const r = Math.max(width, height) * 0.62;
+    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+    const alpha = Math.min(0.09, energy * 0.11);
+    grad.addColorStop(0, `rgba(${COLOR_ACCENT}, ${alpha})`);
+    grad.addColorStop(1, `rgba(${COLOR_ACCENT}, 0)`);
+    ctx.save();
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, width, height);
+    ctx.restore();
+  }
+
+  _clusterCentroid(cluster) {
+    const members = cluster.members;
+    let cx = 0;
+    let cy = 0;
+    for (const m of members) {
+      cx += m.x;
+      cy += m.y;
+    }
+    cx /= members.length;
+    cy /= members.length;
+    let maxR = 40;
+    for (const m of members) {
+      const d = Math.hypot(m.x - cx, m.y - cy) + m.radius;
+      if (d > maxR) maxR = d;
+    }
+    return { cx, cy, maxR };
+  }
+
+  _drawClusterHalo(cluster) {
+    if (cluster.members.length < 3) return;
+    const { ctx } = this;
+    const { cx, cy, maxR } = this._clusterCentroid(cluster);
+    const r = maxR + 36;
+    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+    grad.addColorStop(0, `rgba(${COLOR_FG_RGB}, 0.05)`);
+    grad.addColorStop(1, `rgba(${COLOR_FG_RGB}, 0)`);
+    ctx.save();
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  _drawClusterLabel(cluster) {
+    if (cluster.members.length < 3) return;
+    const { ctx } = this;
+    const { cx, cy, maxR } = this._clusterCentroid(cluster);
+    ctx.save();
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.font = `500 11px "IBM Plex Mono", monospace`;
+    ctx.fillStyle = `rgba(${COLOR_FG_RGB}, 0.55)`;
+    ctx.fillText(cluster.label.toUpperCase(), cx, cy - maxR - 15);
+    ctx.font = `400 8px "IBM Plex Mono", monospace`;
+    ctx.fillStyle = `rgba(${COLOR_DIM}, 0.65)`;
+    ctx.fillText(`${cluster.members.length} ARTICLES`, cx, cy - maxR - 3);
+    ctx.restore();
+  }
+
+  // Structural relationship — a real shared Wikipedia category. Drawn in
+  // neutral tone: the single accent color is reserved for live signal
+  // (pulses, hot nodes, event links), never for static topology.
+  _drawTopicLink(link) {
+    const { ctx } = this;
+    const { a, b } = link;
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.strokeStyle = `rgba(${COLOR_FG_RGB}, 0.1)`;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.restore();
   }
 
   _drawGrid() {
@@ -159,15 +249,20 @@ export class Renderer {
     }
 
     // label — only for nodes with enough presence to earn a caption,
-    // or whichever node is currently hovered
-    const showLabel = node.radius > 7 || node.heat > 0.35 || isHover;
+    // nodes anchoring a real cluster, or whichever node is hovered
+    const showLabel = node.radius > 7 || node.heat > 0.35 || node.clustered || isHover;
     if (showLabel) {
-      const fontSize = isHover ? 11 : 9 + Math.min(3, node.mass * 3);
+      // cluster anchors (well-connected within their topic) read slightly
+      // larger and brighter — a visual center of gravity, not just a dot
+      const degreeBoost = Math.min(2.5, (node.topicDegree || 0) * 0.5);
+      const fontSize = isHover ? 11 : 9 + Math.min(3, node.mass * 3) + degreeBoost * 0.4;
       ctx.font = `500 ${fontSize}px "IBM Plex Mono", monospace`;
       ctx.textBaseline = "middle";
-      const labelAlpha = isHover ? 1 : Math.min(1, node.opacity + 0.25);
+      const labelAlpha = isHover
+        ? 1
+        : Math.min(1, node.opacity + 0.25 + (node.clustered ? 0.15 : 0));
       ctx.fillStyle = `rgba(${COLOR_DIM}, ${labelAlpha})`;
-      if (isHover) ctx.fillStyle = `rgba(243, 237, 224, ${labelAlpha})`;
+      if (isHover) ctx.fillStyle = `rgba(${COLOR_FG_RGB}, ${labelAlpha})`;
       const label = node.title.length > 34 ? node.title.slice(0, 33) + "…" : node.title;
       ctx.fillText(label.toLowerCase(), node.x + node.radius + 7, node.y);
     }
