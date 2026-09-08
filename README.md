@@ -465,6 +465,55 @@ with an expired timer and no follow-up edit was confirmed removed on the
 next `tick()`, while an identical node that received a second edit first
 had its timer cleared and survived past when it would have fired.
 
+### Heavily-read pages, not just heavily-edited ones
+
+The field's node population isn't only driven by live edits — it also
+surfaces whatever's getting the heaviest *reader* traffic right now, using
+Wikipedia's own daily top-pageviews list (the Wikimedia Pageviews REST
+API's `/metrics/pageviews/top/en.wikipedia/all-access/{date}` endpoint,
+`js/trendingService.js`), refreshed every 5 minutes and filtered down to
+actual articles — utility pages and non-content namespaces (`Main_Page`,
+`Special:Search`, `Wikipedia:Featured_pictures`, and the like) are dropped
+first. This is a second, independent kind of attention signal from edit
+activity: a page can be read by millions without a single edit happening
+to it, and the two rarely have the same top page on any given day.
+
+A heavily-read page draws as a **triangle instead of a circle** — the
+field's only shape distinction — so the two kinds of attention stay
+visually separable at a glance (a caption at the bottom of the field spells
+this out: "CIRCLE — LIVE EDIT ACTIVITY · TRIANGLE — TOP-VIEWED TODAY").
+Beyond the shape, a trending node is deliberately *not* a separate system:
+it's created through the exact same node object, queued for the exact same
+real-category lookup, and folded into the exact same union-find topic
+clustering as every edit-driven node — so a trending page can join, anchor,
+or help merge a topic cluster into one of the collapsible polygon shapes
+precisely the way an edited one does, with no special-casing anywhere in
+that pipeline. "Uniting" the two populations meant *not* building a second
+one.
+
+Sizing works as a floor, not an override: a trending node's mass is set
+from its live rank (`#1` reads largest, the `#10` cutoff still clears a
+visibility floor rather than fading to nothing), but `Math.max`'d against
+whatever its own edit-driven mass naturally is — so a page that's
+simultaneously trending *and* being actively edited reads as whichever
+signal is currently stronger, never capped by the other. Trending status
+also exempts a node from the normal idle-decay removal and the random
+early-exit flicker (see above) while it's still actually on the live top
+list — it isn't "quiet," Wikipedia's own numbers say otherwise — but a page
+that drops off a refreshed list simply stops being flagged trending rather
+than being force-removed, so it fades out through the ordinary idle path
+exactly like any other node that's gone quiet.
+
+Verified against the live pageviews API and a real store (not assumed):
+fetching the current top-10 list returns real, positive, correctly-ranked
+view counts with every non-article namespace filtered out; every entry
+becomes a real node with the lowest-ranked one still clearing the
+visibility-floor mass; a node forced to look fully idle and zero-mass
+survives a tick while flagged trending, then loses that flag (without
+being deleted) once a refreshed list no longer includes it; and a
+mid-ranked trending node's mass measurably increases past its trending-only
+floor once real edits start landing on it.
+
 ## Visual system
 
 The field runs on a warm-white/near-black palette rather than the reverse —
@@ -520,12 +569,46 @@ shown up once, the view stays unlocked even if things go quiet again.
 The Index doesn't lead with the full group/cluster/article breakdown —
 it leads with a short digest: the two or three most significant active
 clusters right now (ranked by member count, filtered to only the ones
-the Pattern Engine is actually confident about), each shown with its full
+there's an actual explanation for), each shown with its full
 explanation up front, before any scrolling into the categorized list
 below. This is the same per-cluster insight the rest of the Index shows
 deeper down — promoted to a headline for whatever's most significant
 *globally*, across every topic group, rather than requiring you to know
 which group to look in first.
+
+#### A real online lookup, not just a heuristic
+
+Every cluster's explanation now checks an actual outside source first,
+before ever falling back to the edit-summary heuristic below: Wikipedia's
+own "In the news" feed — the curated box on its Main Page, exposed as
+structured JSON by the featured-feed REST API
+(`/api/rest_v1/feed/featured/{year}/{month}/{day}`, `js/currentEventsService.js`).
+Fetched once for today's edition plus yesterday's (merged and de-duplicated
+so a story still current across the UTC day boundary isn't shown twice),
+cached, and re-checked every 5 minutes. If any member of an active cluster
+is one of the actual Wikipedia articles a current news story links to, that
+story's own sentence is shown verbatim — labeled "WIKIPEDIA — IN THE NEWS"
+with confidence "CONFIRMED — LIVE NEWS MATCH" — instead of a guess built
+from edit summaries, and a confirmed match is always ranked ahead of a
+heuristic-only read in the top digest regardless of cluster size. This
+directly replaced what used to be the only explanation on offer: a same-
+editor "event tie" merely says two pages were touched by the same person
+within 90 seconds, which is a real, verifiable *behavioral* signal but
+never actually says what happened — the online lookup is what can now
+answer that, when a genuine match exists. It's still an honest fallback,
+not a guarantee: most clusters won't have a matching "In the news" story at
+any given moment (only a handful of stories run at once), and the Pattern
+Engine's heuristic read below is what fills in the rest of the time —
+clearly labeled with its own, different byline either way, so it's always
+obvious which kind of explanation a given cluster is getting.
+
+Verified against the live feed, not assumed: fetching today's real "In the
+news" edition, picking an article title it actually linked to (on the day
+this was built: *Gloria Steinem*, from a story about her death),
+confirmed a lookup for that exact title resolves to the real story text
+with HTML tags stripped, an unrelated made-up title resolves to `null`,
+and a lookup made before any fetch has completed also safely returns
+`null` rather than blocking the Index's render.
 
 Below that digest, the full structure is **topic group → topic cluster →
 articles**, in that order — the same four coarse groups as the field's
@@ -540,10 +623,12 @@ article opens it on Wikipedia.
 
 ### Pattern Engine
 
-Every cluster in the Index gets a short, plain-language paragraph guessing
-at *why* it's active right now — the same job a human analyst does when
-they notice several related pages all being edited at once and go looking
-for a reason. It's a real, from-scratch heuristic (`js/insights.js`),
+Whenever the online news lookup above doesn't find a match — most of the
+time — every cluster in the Index still gets a short, plain-language
+paragraph guessing at *why* it's active right now, the same job a human
+analyst does when they notice several related pages all being edited at
+once and go looking for a reason. It's a real, from-scratch heuristic
+(`js/insights.js`),
 attributed in the UI as its own named subsystem ("— PATTERN ENGINE · " plus
 which pattern it matched) rather than folded silently into the rest of the
 app, and it reads signals already sitting in the data that nothing else in

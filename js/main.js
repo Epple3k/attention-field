@@ -5,6 +5,7 @@ import { tieKey } from "./geometry.js";
 import { GROUPS } from "./groups.js";
 import { generateClusterInsight } from "./insights.js";
 import { fetchPagePreview } from "./previewService.js";
+import { refreshCurrentEvents, findEventForTitles } from "./currentEventsService.js";
 
 const canvas = document.getElementById("field");
 const renderer = new Renderer(canvas);
@@ -184,15 +185,39 @@ function escapeHtml(s) {
   return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 }
 
+// A cluster's explanation prefers a real outside source over a heuristic
+// guess: if any of its members is currently named in Wikipedia's own "In
+// the news" feed (see currentEventsService.js — an actual online lookup,
+// refreshed periodically below), that genuine story is used verbatim
+// instead of the Pattern Engine's edit-summary-based reading. Falls back to
+// the heuristic whenever no live news match exists, which is most of the
+// time — this is a real citation when one's available, not a replacement
+// for the heuristic layer.
+function getClusterInsight(cluster) {
+  const newsMatch = findEventForTitles(cluster.members.map((m) => m.title));
+  if (newsMatch) {
+    return { text: newsMatch, confidence: "CONFIRMED — LIVE NEWS MATCH", byline: "WIKIPEDIA — IN THE NEWS" };
+  }
+  return generateClusterInsight(cluster);
+}
+
 // Ranks currently-active named clusters and returns the ones confident
 // enough to explain — used both to render the top-of-page digest and to
 // decide whether INDEX is even worth showing yet (see computeIndexReady).
+// A confirmed live-news match is always ranked ahead of a heuristic-only
+// read, regardless of member count — an actual sourced explanation is more
+// worth surfacing than a bigger cluster with only a guess behind it.
 function topConfidentClusters(limit) {
   const named = store.getClusters().filter((c) => c.members.length >= 3);
   return named
-    .map((cluster) => ({ cluster, insight: generateClusterInsight(cluster) }))
+    .map((cluster) => ({ cluster, insight: getClusterInsight(cluster) }))
     .filter(({ insight }) => insight.confidence !== "PATTERN: INSUFFICIENT SIGNAL")
-    .sort((a, b) => b.cluster.members.length - a.cluster.members.length)
+    .sort((a, b) => {
+      const confirmedA = a.insight.confidence.startsWith("CONFIRMED") ? 1 : 0;
+      const confirmedB = b.insight.confidence.startsWith("CONFIRMED") ? 1 : 0;
+      if (confirmedA !== confirmedB) return confirmedB - confirmedA;
+      return b.cluster.members.length - a.cluster.members.length;
+    })
     .slice(0, limit);
 }
 
@@ -260,7 +285,7 @@ function renderIndex() {
 
     const clusterEntries = [...bucket.clusterMap.entries()].sort((a, b) => b[1].length - a[1].length);
     for (const [cluster, members] of clusterEntries) {
-      const insight = generateClusterInsight({ ...cluster, members });
+      const insight = getClusterInsight({ ...cluster, members });
       html += `<div class="index-cluster">
         <div class="index-cluster__header">
           <span class="index-cluster__name">${escapeHtml(cluster.label.toUpperCase())}</span>
@@ -289,16 +314,21 @@ function renderIndex() {
 }
 
 function articleRows(members) {
+  // trending (heavily-read) members sort by rank ahead of edit-count —
+  // #1 most-viewed outranks a handful of edits, the way it should read
+  const score = (m) => (m.isTrending ? 100000 - m.trendingRank : m.edits);
   return members
     .slice()
-    .sort((a, b) => b.edits - a.edits)
-    .map(
-      (m) =>
-        `<li class="index-article" data-url="${escapeHtml(m.url)}">
+    .sort((a, b) => score(b) - score(a))
+    .map((m) => {
+      const meta = m.isTrending
+        ? `#${m.trendingRank} MOST-VIEWED`
+        : `${m.edits} ${m.edits === 1 ? "EDIT" : "EDITS"}`;
+      return `<li class="index-article" data-url="${escapeHtml(m.url)}">
           <span class="index-article__title">${escapeHtml(m.title)}</span>
-          <span class="index-article__meta">${m.edits} ${m.edits === 1 ? "EDIT" : "EDITS"}</span>
-        </li>`
-    )
+          <span class="index-article__meta">${meta}</span>
+        </li>`;
+    })
     .join("");
 }
 
@@ -504,6 +534,12 @@ setInterval(updateClock, 1000);
 let lastTime = performance.now();
 let indexReadyCheckAccum = 0;
 
+// Fetches once immediately, then re-checks periodically (refreshCurrentEvents
+// itself no-ops if the cache is still fresh) — a live network lookup, not
+// something to await from the render path.
+refreshCurrentEvents();
+let currentEventsCheckAccum = 0;
+
 function frame(now) {
   const dt = Math.min(0.05, (now - lastTime) / 1000);
   lastTime = now;
@@ -572,6 +608,12 @@ function frame(now) {
         dotEls.index.classList.remove("is-locked");
       }
     }
+  }
+
+  currentEventsCheckAccum += dt;
+  if (currentEventsCheckAccum > 60) {
+    currentEventsCheckAccum = 0;
+    refreshCurrentEvents(); // no-ops internally unless the cache is actually stale
   }
 
   // Index is DOM, not canvas — rebuild it on a slow interval, and only

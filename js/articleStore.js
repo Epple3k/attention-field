@@ -19,6 +19,7 @@ import {
 import { clusterShapeRadius, mapAssociationStrength, clamp01 } from "./geometry.js";
 import { fetchCategoriesBatch } from "./categoryService.js";
 import { classifyGroup, GROUPS } from "./groups.js";
+import { fetchTopTrending } from "./trendingService.js";
 
 const MAX_NODES = 60;
 const TAU_HEAT = 5.5; // seconds — burst decay (drives pulse glow, mode-independent)
@@ -50,6 +51,16 @@ const EARLY_EXIT_CHANCE = 0.3;
 const EARLY_EXIT_MIN_MS = 1500;
 const EARLY_EXIT_MAX_MS = 5000;
 
+// Heavily-read pages join the field too, alongside heavily-edited ones —
+// Wikipedia's own daily top-pageviews list (see trendingService.js), not a
+// separate track: they flow through the same category lookup and topic
+// clustering as edit-driven nodes, just rendered as a triangle instead of a
+// circle (see renderer.js) and exempt from the normal idle/flicker decay
+// while they're still actually on that list.
+const TRENDING_TOP_N = 10;
+const TRENDING_FETCH_INTERVAL = 300; // seconds between refreshing the top-pageviews list
+const TRENDING_MIN_MASS = 0.35; // floor so even the #10 slot still reads as a real presence
+
 export const RANGE_STEPS = [
   { label: "1M", seconds: 60 },
   { label: "5M", seconds: 300 },
@@ -79,6 +90,8 @@ export class ArticleStore {
     this._categoryFetchAccum = 0;
     this._pendingFetch = false;
     this._clusterRecomputeAccum = 0;
+    this._trendingFetchAccum = TRENDING_FETCH_INTERVAL; // fetch once immediately on first tick
+    this._pendingTrendingFetch = false;
     this._fieldEnergyEMA = 0;
     this._expandedLabels = new Set(); // clusters the viewer has manually opened
     this._energyBoost = 0; // 0..1 — briefly raised by interactions, decays back to 0
@@ -347,7 +360,15 @@ export class ArticleStore {
 
     for (const node of nodes) {
       const idleSeconds = (now - node.lastActive) / 1000;
-      node.mass *= Math.exp(-dt / tauMass);
+      // a trending node's size is driven by its live pageview rank rather
+      // than the edit-decay curve, but real edit activity can still push it
+      // bigger — trending is a floor, not a ceiling, on top of whatever its
+      // own edit-driven mass naturally decays to
+      if (node.isTrending) {
+        node.mass = Math.max(node.trendingMass, node.mass * Math.exp(-dt / tauMass));
+      } else {
+        node.mass *= Math.exp(-dt / tauMass);
+      }
       node.heat *= Math.exp(-dt / TAU_HEAT);
 
       while (node.history.length && now - node.history[0] > rangeMs) {
@@ -368,7 +389,8 @@ export class ArticleStore {
 
       if (
         earlyExit ||
-        (node.mass < REMOVE_THRESHOLD &&
+        (!node.isTrending &&
+          node.mass < REMOVE_THRESHOLD &&
           node.heat < REMOVE_THRESHOLD &&
           node.rangeCount === 0 &&
           idleSeconds > 8)
@@ -446,6 +468,12 @@ export class ArticleStore {
     if (this._clusterRecomputeAccum > CLUSTER_RECOMPUTE_INTERVAL) {
       this._clusterRecomputeAccum = 0;
       this._recomputeClusters();
+    }
+
+    this._trendingFetchAccum += dt;
+    if (this._trendingFetchAccum > TRENDING_FETCH_INTERVAL && !this._pendingTrendingFetch) {
+      this._trendingFetchAccum = 0;
+      this._refreshTrending();
     }
   }
 
@@ -535,12 +563,20 @@ export class ArticleStore {
   // -------------------------------------------------------------------
 
   describeNode(node) {
+    const groupLabel = node.categoriesLoaded ? GROUPS[node.group].label : null;
+    const groupPart = groupLabel && node.group !== "OTHER" ? ` Grouped under ${groupLabel}.` : "";
+
+    if (node.isTrending) {
+      const viewsPart = node.trendingViews ? ` (~${formatCount(node.trendingViews)} views today)` : "";
+      const editPart =
+        node.edits > 0 ? ` Also ${node.edits} live ${node.edits === 1 ? "edit" : "edits"} observed.` : "";
+      return `Heavily read right now — #${node.trendingRank} most-viewed on Wikipedia today${viewsPart}.${editPart}${groupPart}`;
+    }
+
     const idleSeconds = Math.max(0, (performance.now() - node.lastActive) / 1000);
     const recency =
       idleSeconds < 5 ? "moments ago" : idleSeconds < 90 ? `${Math.round(idleSeconds)}s ago` : `${Math.round(idleSeconds / 60)}m ago`;
     const editWord = node.edits === 1 ? "edit" : "edits";
-    const groupLabel = node.categoriesLoaded ? GROUPS[node.group].label : null;
-    const groupPart = groupLabel && node.group !== "OTHER" ? ` Grouped under ${groupLabel}.` : "";
     return `Wikipedia article — ${node.edits} ${editWord} observed, last active ${recency}.${groupPart}`;
   }
 
@@ -616,6 +652,51 @@ export class ArticleStore {
       // leave affected nodes without categories — they simply won't cluster
     } finally {
       this._pendingFetch = false;
+    }
+  }
+
+  async _refreshTrending() {
+    this._pendingTrendingFetch = true;
+    try {
+      const list = await fetchTopTrending(TRENDING_TOP_N);
+      if (list.length) this.syncTrending(list);
+    } catch {
+      // leave the field as-is — whatever trending nodes already exist just
+      // keep aging normally instead of being force-refreshed this cycle
+    } finally {
+      this._pendingTrendingFetch = false;
+    }
+  }
+
+  // Adds/updates a node for each currently top-viewed article, and lets any
+  // node that fell out of the list stop being treated as trending (it then
+  // decays away through the ordinary idle path if nothing else — a real
+  // edit — is keeping it alive, exactly like any other node that's gone
+  // quiet, rather than vanishing the instant it drops off the list).
+  syncTrending(list) {
+    const stillTrending = new Set();
+    const topN = list.length;
+    for (const { title, rank, views } of list) {
+      stillTrending.add(title);
+      const trendingMass = TRENDING_MIN_MASS + (1 - TRENDING_MIN_MASS) * (1 - (rank - 1) / Math.max(1, topN));
+      let node = this.nodes.get(title);
+      if (!node) {
+        if (this.nodes.size >= MAX_NODES) this._evictWeakest();
+        node = this._createTrendingNode(title, rank, views, trendingMass);
+        this.nodes.set(title, node);
+        this._categoryQueue.add(title);
+        continue;
+      }
+      node.isTrending = true;
+      node.trendingRank = rank;
+      node.trendingViews = views;
+      node.trendingMass = trendingMass;
+      // being independently confirmed as heavily-read overrides the random
+      // early-exit flicker, the same way a real second edit does
+      node.earlyExitAt = null;
+    }
+    for (const node of this.nodes.values()) {
+      if (node.isTrending && !stillTrending.has(node.title)) node.isTrending = false;
     }
   }
 
@@ -771,6 +852,60 @@ export class ArticleStore {
       lastUser: edit.user,
       url: edit.url,
       preview: undefined, // set by main.js on hover-dwell — see previewService.js
+      isTrending: false,
+      trendingRank: null,
+      trendingViews: null,
+      trendingMass: 0,
+    };
+  }
+
+  // A node for a heavily-read (not necessarily heavily-edited) article —
+  // same shape as _createNode's, so it's indistinguishable to every other
+  // system (physics, clustering, hover, decay) except the isTrending flag
+  // renderer.js reads to draw it as a triangle and the removal exemption
+  // above. Starts at its target trendingMass immediately rather than easing
+  // in, since it's already a confirmed, current fact about the page, not a
+  // fresh pulse of activity to ramp up from zero.
+  _createTrendingNode(title, rank, views, trendingMass) {
+    const b = this.bounds;
+    const marginX = (b.right - b.left) * 0.16;
+    const marginY = (b.bottom - b.top) * 0.16;
+    const now = performance.now();
+    return {
+      title,
+      x: rand(b.left + marginX, b.right - marginX),
+      y: rand(b.top + marginY, b.bottom - marginY),
+      vx: rand(-6, 6),
+      vy: rand(-6, 6),
+      pinned: false,
+      stability: 0,
+      bodyMass: 1,
+      mass: trendingMass,
+      heat: 0,
+      radius: BASE_RADIUS,
+      opacity: 0.1,
+      edits: 0,
+      everNew: false,
+      recentComments: [],
+      recentEditors: new Set(),
+      history: [],
+      rangeCount: 0,
+      categories: null,
+      categoriesLoaded: false,
+      group: "OTHER",
+      topicDegree: 0,
+      clustered: false,
+      createdAt: now,
+      earlyExitAt: null, // trending nodes' lifecycle is governed by staying on the top-pageviews list, not the random flicker
+      lastActive: now,
+      lastEditType: null,
+      lastUser: null,
+      url: `https://en.wikipedia.org/wiki/${encodeURIComponent(title.replace(/ /g, "_"))}`,
+      preview: undefined,
+      isTrending: true,
+      trendingRank: rank,
+      trendingViews: views,
+      trendingMass,
     };
   }
 
@@ -790,4 +925,10 @@ function rand(min, max) {
 
 function clamp(v, min, max) {
   return Math.max(min, Math.min(max, v));
+}
+
+function formatCount(n) {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(n);
 }

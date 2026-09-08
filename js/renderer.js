@@ -520,10 +520,19 @@ export class Renderer {
 
     ctx.save();
 
-    // core dot
+    // core shape — a triangle marks a heavily-read (trending) page, a
+    // circle marks everything driven by live edit activity; see
+    // trendingService.js/articleStore.js. Sized off the same node.radius
+    // either way, so the two kinds sit naturally in the same field and the
+    // same merged cluster shapes without any special-casing elsewhere.
+    const shapeR = Math.max(node.radius, 1.4);
     const opacity = node.opacity * dim;
     ctx.beginPath();
-    ctx.arc(node.x, node.y, Math.max(node.radius, 1.4), 0, Math.PI * 2);
+    if (node.isTrending) {
+      trianglePath(ctx, node.x, node.y, shapeR * 1.25);
+    } else {
+      ctx.arc(node.x, node.y, shapeR, 0, Math.PI * 2);
+    }
     ctx.fillStyle = `rgba(${coreRgb}, ${opacity})`;
     ctx.fill();
 
@@ -635,6 +644,21 @@ export class Renderer {
     }
     return false;
   }
+}
+
+// Traces a point-up equilateral triangle inscribed in radius r, centered
+// at (x, y) — the trending-node marker. Left as an open path (no
+// beginPath/fill/stroke) so the caller controls those, same convention as
+// ctx.arc.
+function trianglePath(ctx, x, y, r) {
+  for (let i = 0; i < 3; i++) {
+    const angle = -Math.PI / 2 + (i / 3) * Math.PI * 2;
+    const px = x + Math.cos(angle) * r;
+    const py = y + Math.sin(angle) * r;
+    if (i === 0) ctx.moveTo(px, py);
+    else ctx.lineTo(px, py);
+  }
+  ctx.closePath();
 }
 
 // Linearly blends two "r, g, b" strings by t (0 = a, 1 = b).
