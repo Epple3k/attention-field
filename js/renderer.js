@@ -12,6 +12,7 @@ export class Renderer {
     this.ctx = canvas.getContext("2d");
     this.dpr = Math.min(window.devicePixelRatio || 1, 2);
     this.hoverNode = null;
+    this.hoverCluster = null;
   }
 
   resize() {
@@ -31,24 +32,46 @@ export class Renderer {
 
     this._drawGrid();
 
-    const nodes = store.getNodes();
+    const allNodes = store.getNodes();
     const rings = store.getRings();
     const links = store.getLinks();
     const topicLinks = store.getTopicLinks();
     const clusters = store.getClusters();
     const energy = store.getFieldEnergy();
 
+    // members of a collapsed cluster are no longer individually rendered —
+    // the merged shape stands in for all of them
+    const hidden = new Set();
+    for (const c of clusters) {
+      if (c.collapsed) for (const m of c.members) hidden.add(m);
+    }
+    const nodes = allNodes.filter((n) => !hidden.has(n));
+
     this._drawAmbientGlow(energy);
-    for (const cluster of clusters) this._drawClusterHalo(cluster);
-    for (const tl of topicLinks) this._drawTopicLink(tl);
-    for (const link of links) this._drawLink(link);
-    for (const ring of rings) this._drawRing(ring);
+    for (const cluster of clusters) {
+      if (!cluster.collapsed && cluster.members.length >= 3) this._drawClusterHalo(cluster);
+    }
+    for (const tl of topicLinks) {
+      if (hidden.has(tl.a) || hidden.has(tl.b)) continue;
+      this._drawTopicLink(tl);
+    }
+    for (const link of links) {
+      if (hidden.has(link.a) || hidden.has(link.b)) continue;
+      this._drawLink(link);
+    }
+    for (const ring of rings) {
+      if (hidden.has(ring.node)) continue;
+      this._drawRing(ring);
+    }
 
     // sort so larger / hotter nodes paint last (on top)
     nodes.sort((a, b) => a.mass + a.heat - (b.mass + b.heat));
     for (const node of nodes) this._drawNode(node);
 
-    for (const cluster of clusters) this._drawClusterLabel(cluster);
+    for (const cluster of clusters) {
+      if (cluster.collapsed) this._drawClusterShape(cluster);
+      else if (cluster.members.length >= 3) this._drawClusterLabel(cluster);
+    }
 
     return nodes;
   }
@@ -107,15 +130,88 @@ export class Renderer {
     if (cluster.members.length < 3) return;
     const { ctx } = this;
     const { cx, cy, maxR } = this._clusterCentroid(cluster);
+    const isHover = this.hoverCluster === cluster;
     ctx.save();
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.font = `500 11px "IBM Plex Mono", monospace`;
-    ctx.fillStyle = `rgba(${COLOR_FG_RGB}, 0.55)`;
+    ctx.fillStyle = `rgba(${COLOR_FG_RGB}, ${isHover ? 0.85 : 0.55})`;
     ctx.fillText(cluster.label.toUpperCase(), cx, cy - maxR - 15);
     ctx.font = `400 8px "IBM Plex Mono", monospace`;
     ctx.fillStyle = `rgba(${COLOR_DIM}, 0.65)`;
-    ctx.fillText(`${cluster.members.length} ARTICLES`, cx, cy - maxR - 3);
+    const hint = cluster.collapsible ? `${cluster.members.length} ARTICLES — CLICK TO COLLAPSE` : `${cluster.members.length} ARTICLES`;
+    ctx.fillText(hint, cx, cy - maxR - 3);
+    if (isHover && cluster.collapsible) {
+      ctx.beginPath();
+      ctx.arc(cx, cy, maxR + 34, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(${COLOR_ACCENT}, 0.35)`;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // radius formula shared between drawing the collapsed shape and hit-
+  // testing it, so the clickable region always matches what's on screen
+  _clusterShapeRadius(memberCount) {
+    return 22 + Math.min(30, memberCount * 2.2);
+  }
+
+  // A collapsed cluster stops being several dots and becomes one object: a
+  // regular polygon whose side count equals its member count (literally
+  // "made of N things"), rotating slowly, that brightens with the members'
+  // aggregate live activity — a real aggregated pulse, not decoration.
+  _drawClusterShape(cluster) {
+    const { ctx } = this;
+    const { cx, cy } = this._clusterCentroid(cluster);
+    const n = cluster.members.length;
+    const sides = Math.max(3, Math.min(12, n));
+    const heat = cluster.members.reduce((s, m) => s + m.heat, 0) / n;
+    const r = this._clusterShapeRadius(n);
+    const isHover = this.hoverCluster === cluster;
+    const rotation = (performance.now() / 1000) * (0.06 + heat * 0.5);
+
+    ctx.save();
+    ctx.beginPath();
+    for (let i = 0; i < sides; i++) {
+      const angle = rotation + (i / sides) * Math.PI * 2;
+      const px = cx + Math.cos(angle) * r;
+      const py = cy + Math.sin(angle) * r;
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+
+    const hotColor = heat > 0.12 || isHover;
+    const fillAlpha = 0.05 + heat * 0.1 + (isHover ? 0.03 : 0);
+    ctx.fillStyle = `rgba(${hotColor ? COLOR_ACCENT : COLOR_FG_RGB}, ${fillAlpha})`;
+    ctx.fill();
+
+    ctx.strokeStyle = `rgba(${hotColor ? COLOR_ACCENT : COLOR_FG_RGB}, ${isHover ? 0.9 : 0.4 + heat * 0.4})`;
+    ctx.lineWidth = isHover ? 1.6 : 1.1;
+    ctx.stroke();
+
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.font = `600 12px "IBM Plex Mono", monospace`;
+    ctx.fillStyle = `rgba(${COLOR_FG_RGB}, 0.9)`;
+    ctx.fillText(cluster.label.toUpperCase(), cx, cy - 5);
+
+    ctx.font = `400 9px "IBM Plex Mono", monospace`;
+    ctx.fillStyle = `rgba(${COLOR_DIM}, 0.85)`;
+    ctx.fillText(`${n} ARTICLES — CLICK TO EXPAND`, cx, cy + 10);
+
+    if (isHover) {
+      const preview = cluster.members
+        .slice(0, 3)
+        .map((m) => m.title.toLowerCase())
+        .join(" · ");
+      const more = n > 3 ? ` +${n - 3} more` : "";
+      ctx.font = `400 8px "IBM Plex Mono", monospace`;
+      ctx.fillStyle = `rgba(${COLOR_DIM}, 0.9)`;
+      ctx.fillText(preview + more, cx, cy + r + 15);
+    }
+
     ctx.restore();
   }
 
@@ -278,6 +374,26 @@ export class Renderer {
       const r = Math.max(node.radius, 6) + 4;
       if (d <= r && d < closestDist) {
         closest = node;
+        closestDist = d;
+      }
+    }
+    return closest;
+  }
+
+  // Only clusters large enough to be collapsible respond to hover/click —
+  // a bare halo on a 3-member cluster is informational only, not a control.
+  hitTestCluster(x, y, clusters) {
+    let closest = null;
+    let closestDist = Infinity;
+    for (const cluster of clusters) {
+      if (!cluster.collapsible) continue;
+      const { cx, cy, maxR } = this._clusterCentroid(cluster);
+      const testR = cluster.collapsed
+        ? this._clusterShapeRadius(cluster.members.length) + 6
+        : maxR + 36;
+      const d = Math.hypot(cx - x, cy - y);
+      if (d <= testR && d < closestDist) {
+        closest = cluster;
         closestDist = d;
       }
     }

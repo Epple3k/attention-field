@@ -9,6 +9,7 @@ const JITTER = 5.5;
 const MAX_SPEED = 60;
 const LINK_STRENGTH = 26;
 const TOPIC_STRENGTH = 16;
+const COLLAPSE_STRENGTH = 150;
 
 export function stepPhysics(nodes, bounds, dt) {
   const n = nodes.length;
@@ -115,6 +116,34 @@ export function applyTopicForces(links, dt) {
     a.vy += fy;
     b.vx -= fx;
     b.vy -= fy;
+  }
+}
+
+/** A collapsed cluster pulls its members tightly toward their shared
+ * centroid — this is what physically turns several separate nodes into
+ * one compact body. Removing this force (on expand) lets normal repulsion
+ * and topic springs take back over, so members visibly fly back out to
+ * their own positions instead of just reappearing. */
+export function applyClusterCollapseForce(clusters, dt) {
+  for (const cluster of clusters) {
+    if (!cluster.collapsed) continue;
+    const members = cluster.members;
+    let cx = 0;
+    let cy = 0;
+    for (const m of members) {
+      cx += m.x;
+      cy += m.y;
+    }
+    cx /= members.length;
+    cy /= members.length;
+    for (const m of members) {
+      const dx = cx - m.x;
+      const dy = cy - m.y;
+      const dist = Math.hypot(dx, dy) || 1;
+      const force = COLLAPSE_STRENGTH * dt;
+      m.vx += (dx / dist) * force;
+      m.vy += (dy / dist) * force;
+    }
   }
 }
 

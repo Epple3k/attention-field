@@ -150,7 +150,10 @@ window.addEventListener("resize", resize);
 resize();
 
 // ---------------------------------------------------------------------
-// Hover interaction — highlight only, no modal/inspector in v1.
+// Hover / click — individual nodes open their Wikipedia article; a
+// collapsible cluster's merged shape (or its halo, once expanded) toggles
+// between "one shape" and "its individual nodes." Node hover always wins
+// over cluster hover so members stay reachable inside an expanded cluster.
 // ---------------------------------------------------------------------
 let pointer = null;
 canvas.addEventListener("mousemove", (e) => {
@@ -160,9 +163,14 @@ canvas.addEventListener("mousemove", (e) => {
 canvas.addEventListener("mouseleave", () => {
   pointer = null;
   renderer.hoverNode = null;
+  renderer.hoverCluster = null;
 });
 canvas.addEventListener("click", () => {
-  if (renderer.hoverNode) window.open(renderer.hoverNode.url, "_blank", "noopener");
+  if (renderer.hoverNode) {
+    window.open(renderer.hoverNode.url, "_blank", "noopener");
+  } else if (renderer.hoverCluster) {
+    store.toggleClusterExpanded(renderer.hoverCluster.label);
+  }
 });
 
 // ---------------------------------------------------------------------
@@ -209,9 +217,15 @@ function frame(now) {
   const nodes = renderer.draw(store);
 
   renderer.hoverNode = pointer ? renderer.hitTest(pointer.x, pointer.y, nodes) : null;
-  canvas.style.cursor = renderer.hoverNode ? "pointer" : "default";
+  renderer.hoverCluster =
+    pointer && !renderer.hoverNode
+      ? renderer.hitTestCluster(pointer.x, pointer.y, store.getClusters())
+      : null;
+  canvas.style.cursor = renderer.hoverNode || renderer.hoverCluster ? "pointer" : "default";
 
-  const count = nodes.length;
+  // the readout counts every article the system is actually tracking,
+  // including ones currently merged into a collapsed cluster shape
+  const count = store.getNodes().length;
   dom.nodeCount.textContent = String(count).padStart(3, "0");
   dom.nodeFill.style.width = `${Math.min(100, (count / 60) * 100)}%`;
 

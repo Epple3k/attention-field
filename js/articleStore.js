@@ -3,7 +3,13 @@
 // event links spawned by edits, and the persistent topic clusters computed
 // from real Wikipedia category data. Knows nothing about rendering.
 
-import { stepPhysics, displaceNeighbors, applyLinkForces, applyTopicForces } from "./physics.js";
+import {
+  stepPhysics,
+  displaceNeighbors,
+  applyLinkForces,
+  applyTopicForces,
+  applyClusterCollapseForce,
+} from "./physics.js";
 import { fetchCategoriesBatch } from "./categoryService.js";
 
 const MAX_NODES = 60;
@@ -23,6 +29,7 @@ const VOLUME_REFERENCE = 14; // edits-in-range that count as a "full" node in VO
 const CATEGORY_FETCH_INTERVAL = 1.5; // seconds between batched category lookups
 const CLUSTER_RECOMPUTE_INTERVAL = 1.2; // seconds between topology recomputes
 const FIELD_ENERGY_TAU = 3.5; // seconds — smoothing for the ambient energy readout
+export const COLLAPSE_THRESHOLD = 4; // members at which a cluster merges into one shape
 
 export const RANGE_STEPS = [
   { label: "1M", seconds: 60 },
@@ -52,6 +59,7 @@ export class ArticleStore {
     this._pendingFetch = false;
     this._clusterRecomputeAccum = 0;
     this._fieldEnergyEMA = 0;
+    this._expandedLabels = new Set(); // clusters the viewer has manually opened
 
     this.rangeIndex = 2; // 15M, matches original default
     this.mode = MODE_STEPS[0];
@@ -72,6 +80,14 @@ export class ArticleStore {
 
   setFilter(f) {
     this.filter = f;
+  }
+
+  /** Opens a collapsed cluster into its individual nodes, or re-collapses
+   * one the viewer previously opened. Keyed by label since cluster
+   * membership objects are rebuilt on every recompute. */
+  toggleClusterExpanded(label) {
+    if (this._expandedLabels.has(label)) this._expandedLabels.delete(label);
+    else this._expandedLabels.add(label);
   }
 
   get rangeSeconds() {
@@ -164,6 +180,7 @@ export class ArticleStore {
     if (nodes.length) {
       applyLinkForces(this.links, dt);
       applyTopicForces(this.topicLinks, dt);
+      applyClusterCollapseForce(this.clusters, dt);
       stepPhysics(nodes, this.bounds, dt);
     }
 
@@ -215,7 +232,17 @@ export class ArticleStore {
 
   _pruneClusters() {
     return this.clusters
-      .map((c) => ({ ...c, members: c.members.filter((n) => this.nodes.has(n.title)) }))
+      .map((c) => {
+        // re-derive every tick, not just on the slower full recompute,
+        // so clicking a cluster open/closed registers immediately
+        const expanded = this._expandedLabels.has(c.label);
+        return {
+          ...c,
+          members: c.members.filter((n) => this.nodes.has(n.title)),
+          expanded,
+          collapsed: c.collapsible && !expanded,
+        };
+      })
       .filter((c) => c.members.length >= 2);
   }
 
@@ -404,7 +431,16 @@ export class ArticleStore {
       if (members.length >= 3) {
         for (const m of members) m.clustered = true;
       }
-      clusters.push({ members, label: label || "RELATED" });
+      const finalLabel = label || "RELATED";
+      const collapsible = members.length >= COLLAPSE_THRESHOLD;
+      const expanded = this._expandedLabels.has(finalLabel);
+      clusters.push({
+        members,
+        label: finalLabel,
+        collapsible,
+        expanded,
+        collapsed: collapsible && !expanded,
+      });
     }
     this.clusters = clusters;
   }

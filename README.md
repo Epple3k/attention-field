@@ -72,6 +72,27 @@ neutral warm-white for *static structure*:
   connects them — evidence of coordinated behavior (a template rollout,
   someone following a thread across pages) happening right now.
 
+#### Merged cluster shapes
+
+A topic cluster that grows to 4+ members physically converges and merges
+into a single object — a regular polygon whose side count equals its member
+count, so a hexagon really is "6 articles fused into one." Individual dots
+stop being drawn; the shape's own fill/stroke brightens with its members'
+combined live activity, so a burst of edits happening *inside* it is still
+visible as one aggregated pulse. **Hover** it to preview a few member
+titles; **click** it to expand — members physically fly back apart to their
+own positions and become individually visible and clickable again. Click
+the expanded halo again to re-collapse. This is the field's actual
+synthesis mechanic: once there's enough evidence for a topic, the field
+stops showing you N separate things and shows you one thing, with the
+individual evidence still one click away.
+
+Verified end-to-end against the live API (Node, no browser): four articles
+known to share `Category:Programming languages`-adjacent categories
+converged from an average ~350px spread down to ~30px while collapsed,
+flew back out to ~200px on expand, and re-collapsed correctly on a second
+toggle.
+
 ### Synthesis layer
 
 Three things read the field's current topology back to you, so it's never
@@ -109,7 +130,8 @@ HTML/CSS/JS with a `<canvas>` field.
 
 Live connection, ~60 concurrent article nodes, pulse-on-edit, decay-when-idle,
 a wheel-controlled GAIN, functional RANGE/MODE/FILTER, real Wikipedia-category
-topic clustering with cluster halos/labels, same-editor event links, a
+topic clustering with cluster halos/labels, merged/collapsible cluster shapes
+with hover-preview and click-to-expand, same-editor event links, a
 synthesis-level FOCUS readout, ambient field-energy glow, and the core visual
 identity are in place. Pageview context (for genuine 24h history), trails,
 sound, and deeper article inspection remain planned second-iteration
