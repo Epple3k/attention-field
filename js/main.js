@@ -4,6 +4,7 @@ import { Renderer } from "./renderer.js";
 import { tieKey } from "./geometry.js";
 import { GROUPS } from "./groups.js";
 import { generateClusterInsight } from "./insights.js";
+import { fetchPagePreview } from "./previewService.js";
 
 const canvas = document.getElementById("field");
 const renderer = new Renderer(canvas);
@@ -347,6 +348,30 @@ let dragStart = null;
 let dragHistory = [];
 let suppressNextClick = false;
 
+// ---------------------------------------------------------------------
+// Wikipedia page preview — a short dwell after a node becomes hovered
+// (not instantly, so sweeping the cursor across many nodes doesn't fire
+// a request per node), fetch its real Wikipedia summary/thumbnail and
+// attach it to the node itself once resolved. The renderer just reads
+// node.preview if it's there; nothing here blocks the rest of the hover
+// panel from showing immediately.
+// ---------------------------------------------------------------------
+const PREVIEW_DWELL_MS = 220;
+let previewTimer = null;
+let previewTimerNode = null;
+
+function schedulePreviewFetch(node) {
+  if (node === previewTimerNode) return; // already scheduled/fetched for this exact node
+  clearTimeout(previewTimer);
+  previewTimerNode = node;
+  if (!node || node.preview !== undefined) return; // nothing hovered, or already have a result (even a cached failure)
+  previewTimer = setTimeout(() => {
+    fetchPagePreview(node.title).then((result) => {
+      node.preview = result; // null on failure — still marks "attempted," no retry storm on repeat hovers
+    });
+  }, PREVIEW_DWELL_MS);
+}
+
 canvas.addEventListener("mousemove", (e) => {
   const rect = canvas.getBoundingClientRect();
   pointer = { x: e.clientX - rect.left, y: e.clientY - rect.top };
@@ -491,6 +516,7 @@ function frame(now) {
   // read next tick — hovering stabilizes this node (and its direct ties)
   // by raising its effective mass, never by pushing on anything else
   store.setHoveredNode(renderer.hoverNode);
+  schedulePreviewFetch(renderer.hoverNode);
 
   let tieHover = null;
   if (pointer && !renderer.hoverNode && !dragging) {

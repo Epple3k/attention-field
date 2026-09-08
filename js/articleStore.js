@@ -39,6 +39,17 @@ const CLUSTER_RECOMPUTE_INTERVAL = 1.2; // seconds between topology recomputes
 const FIELD_ENERGY_TAU = 3.5; // seconds — smoothing for the ambient energy readout
 export const COLLAPSE_THRESHOLD = 4; // members at which a cluster merges into one shape
 
+// Not every spark of attention turns into something sustained — most real
+// activity has a lot of one-off glances that never get a second look. A
+// fraction of brand-new nodes get a short, random early-exit timer instead
+// of waiting out the normal mass/heat decay curve, so the field's
+// population doesn't feel like it's on one uniform clock. A second edit
+// before the timer fires cancels it — real, repeated activity always
+// overrides the random flicker.
+const EARLY_EXIT_CHANCE = 0.3;
+const EARLY_EXIT_MIN_MS = 1500;
+const EARLY_EXIT_MAX_MS = 5000;
+
 export const RANGE_STEPS = [
   { label: "1M", seconds: 60 },
   { label: "5M", seconds: 300 },
@@ -184,7 +195,10 @@ export class ArticleStore {
   }
 
   collapseCluster(label) {
+    if (!this._expandedLabels.has(label)) return;
     this._expandedLabels.delete(label);
+    this._collapseBurst(label);
+    this.boostEnergy(0.5);
   }
 
   getExpandedClusters() {
@@ -233,6 +247,34 @@ export class ArticleStore {
     });
   }
 
+  // The inverse of _burstCluster — a one-time inward kick the instant a
+  // cluster re-collapses, so closing one reads as a decisive "snap"
+  // rather than just a passive drift back together (summaryCollapseAttraction
+  // still does the rest of the work converging them into the merged shape;
+  // this just makes the moment itself a visible event, symmetric with expand).
+  _collapseBurst(label) {
+    const cluster = this.clusters.find((c) => c.label === label);
+    if (!cluster) return;
+    const members = cluster.members;
+    let cx = 0;
+    let cy = 0;
+    for (const m of members) {
+      cx += m.x;
+      cy += m.y;
+    }
+    cx /= members.length;
+    cy /= members.length;
+
+    const pullForce = 70 + members.length * 5;
+    for (const m of members) {
+      const dx = cx - m.x;
+      const dy = cy - m.y;
+      const dist = Math.hypot(dx, dy) || 1;
+      m.vx += (dx / dist) * pullForce;
+      m.vy += (dy / dist) * pullForce;
+    }
+  }
+
   get rangeSeconds() {
     return RANGE_STEPS[this.rangeIndex].seconds;
   }
@@ -259,6 +301,9 @@ export class ArticleStore {
     }
 
     node.edits += 1;
+    // a second edit is real, repeated activity — cancel any random
+    // early-exit timer, the same way sustained interest always should
+    if (!isNewNode) node.earlyExitAt = null;
     node.lastActive = now;
     node.lastEditType = edit.type;
     node.url = edit.url;
@@ -319,11 +364,14 @@ export class ArticleStore {
         node.opacity = clamp(0.08 + node.mass * 0.55 + node.heat * 0.55, 0.06, 1);
       }
 
+      const earlyExit = node.earlyExitAt !== null && now >= node.earlyExitAt;
+
       if (
-        node.mass < REMOVE_THRESHOLD &&
-        node.heat < REMOVE_THRESHOLD &&
-        node.rangeCount === 0 &&
-        idleSeconds > 8
+        earlyExit ||
+        (node.mass < REMOVE_THRESHOLD &&
+          node.heat < REMOVE_THRESHOLD &&
+          node.rangeCount === 0 &&
+          idleSeconds > 8)
       ) {
         this.nodes.delete(node.title);
       }
@@ -689,6 +737,7 @@ export class ArticleStore {
     const b = this.bounds;
     const marginX = (b.right - b.left) * 0.16;
     const marginY = (b.bottom - b.top) * 0.16;
+    const now = performance.now();
     return {
       title: edit.title,
       x: rand(b.left + marginX, b.right - marginX),
@@ -713,10 +762,15 @@ export class ArticleStore {
       group: "OTHER",
       topicDegree: 0,
       clustered: false,
-      lastActive: performance.now(),
+      createdAt: now, // drives the node's color desaturating over its lifetime — see renderer.js
+      // a random chance this one just flickers out shortly, rather than
+      // waiting out the normal decay curve — see EARLY_EXIT_* above
+      earlyExitAt: Math.random() < EARLY_EXIT_CHANCE ? now + rand(EARLY_EXIT_MIN_MS, EARLY_EXIT_MAX_MS) : null,
+      lastActive: now,
       lastEditType: edit.type,
       lastUser: edit.user,
       url: edit.url,
+      preview: undefined, // set by main.js on hover-dwell — see previewService.js
     };
   }
 

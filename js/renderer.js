@@ -5,6 +5,7 @@
 
 import { clusterShapeRadius, convexHull } from "./geometry.js";
 import { GROUPS } from "./groups.js";
+import { getCachedImage } from "./previewService.js";
 
 const COLOR_BG = "#f7f6f2";
 const COLOR_FG_RGB = "22, 21, 16"; // near-black ink, on the light field background
@@ -17,6 +18,10 @@ const COLOR_DIM = "96, 94, 87";
 const COLOR_PANEL_BG = "20, 19, 16";
 const COLOR_PANEL_INK = "250, 248, 244";
 const COLOR_PANEL_INK_DIM = "198, 195, 188";
+// A node's group color desaturates toward gray over this many seconds
+// (an exponential decay constant, not a hard cutoff) — see _drawNode.
+const AGE_SATURATION_TAU = 40;
+const MIN_SATURATION = 0.12; // floor so a very old node still faintly reads its hue
 
 export class Renderer {
   constructor(canvas) {
@@ -245,15 +250,24 @@ export class Renderer {
   }
 
   _drawNodeSummary(store, node) {
-    this._drawSummaryBox(
-      node.x,
-      node.y + node.radius + 22,
-      [
-        { text: node.title, kind: "title" },
-        { text: store.describeNode(node), kind: "body" },
-      ],
-      true
-    );
+    const lines = [
+      { text: node.title, kind: "title" },
+      { text: store.describeNode(node), kind: "body" },
+    ];
+    // a small live preview of the actual Wikipedia page — the same
+    // extract + thumbnail Wikipedia's own "Page Previews" hovercards use,
+    // fetched on hover with a short dwell (see main.js) and cached on the
+    // node once resolved; absent until then, never blocking the rest of
+    // the panel from showing immediately
+    const preview = node.preview;
+    let thumbnailImg = null;
+    if (preview && preview.extract) {
+      const extract =
+        preview.extract.length > 210 ? preview.extract.slice(0, 207) + "…" : preview.extract;
+      lines.push({ text: extract, kind: "extract" });
+      if (preview.thumbnailUrl) thumbnailImg = getCachedImage(preview.thumbnailUrl);
+    }
+    this._drawSummaryBox(node.x, node.y + node.radius + 22, lines, true, thumbnailImg);
   }
 
   _drawClusterSummary(store, cluster) {
@@ -295,26 +309,35 @@ export class Renderer {
   // Canvas-drawn context-summary panel — the one place this text renders,
   // so a node's, a cluster's, and a tie's hover panel all look and behave
   // the same way: a real backing plate behind large, high-contrast type,
-  // not small text floating loose over whatever's behind it.
-  _drawSummaryBox(anchorX, anchorY, lines, anchorBelow) {
+  // not small text floating loose over whatever's behind it. An optional
+  // thumbnail (node hover only, once its preview has loaded) switches the
+  // layout to a left-aligned image+text card instead of the plain
+  // centered text block cluster/tie summaries use.
+  _drawSummaryBox(anchorX, anchorY, lines, anchorBelow, thumbnailImg = null) {
     const { ctx, width, height } = this;
     ctx.save();
-    ctx.textAlign = "center";
 
-    const maxTextWidth = Math.min(360, width - 56);
+    const hasImage = !!thumbnailImg;
+    const imageSize = 54;
+    const imageGap = 12;
     const padX = 16;
-    const padY = 12;
-    const lineHeight = { title: 21, body: 17, meta: 15 };
+    const padY = 14;
+    const maxTextWidth = Math.min(hasImage ? 300 : 360, width - 56 - (hasImage ? imageSize + imageGap : 0));
+    const lineHeight = { title: 21, body: 17, meta: 15, extract: 16 };
     const font = {
       title: `600 15px "IBM Plex Mono", monospace`,
       body: `400 13px "IBM Plex Mono", monospace`,
       meta: `400 11px "IBM Plex Mono", monospace`,
+      extract: `400 11.5px "IBM Plex Mono", monospace`,
     };
     const color = {
       title: `rgba(${COLOR_PANEL_INK}, 1)`,
       body: `rgba(${COLOR_PANEL_INK}, 0.9)`,
       meta: `rgba(${COLOR_PANEL_INK_DIM}, 0.95)`,
+      extract: `rgba(${COLOR_PANEL_INK_DIM}, 1)`,
     };
+
+    ctx.textAlign = hasImage ? "left" : "center";
 
     // first pass: wrap and measure every line so the backing panel can be
     // sized to fit before anything is drawn
@@ -333,9 +356,11 @@ export class Renderer {
       return;
     }
 
-    const blockHeight = rows.reduce((s, r) => s + lineHeight[r.kind], 0);
-    const boxWidth = blockWidth + padX * 2;
-    const boxHeight = blockHeight + padY * 2;
+    const textBlockHeight = rows.reduce((s, r) => s + lineHeight[r.kind], 0);
+    const contentWidth = hasImage ? imageSize + imageGap + blockWidth : blockWidth;
+    const contentHeight = hasImage ? Math.max(imageSize, textBlockHeight) : textBlockHeight;
+    const boxWidth = contentWidth + padX * 2;
+    const boxHeight = contentHeight + padY * 2;
 
     const boxCenterX = Math.max(boxWidth / 2 + 10, Math.min(width - boxWidth / 2 - 10, anchorX));
     let boxTop = anchorBelow ? anchorY : anchorY - boxHeight;
@@ -348,12 +373,22 @@ export class Renderer {
     ctx.lineWidth = 1;
     ctx.strokeRect(boxLeft + 0.5, boxTop + 0.5, boxWidth - 1, boxHeight - 1);
 
+    let textX = boxCenterX;
+    let textStartY = boxTop + padY;
+    if (hasImage) {
+      const imgX = boxLeft + padX;
+      const imgY = boxTop + (boxHeight - imageSize) / 2;
+      drawCoverImage(ctx, thumbnailImg, imgX, imgY, imageSize);
+      textX = imgX + imageSize + imageGap;
+      textStartY = boxTop + (boxHeight - textBlockHeight) / 2;
+    }
+
     ctx.textBaseline = "top";
-    let y = boxTop + padY;
+    let y = textStartY;
     for (const row of rows) {
       ctx.font = font[row.kind];
       ctx.fillStyle = color[row.kind];
-      ctx.fillText(row.text, boxCenterX, y);
+      ctx.fillText(row.text, textX, y);
       y += lineHeight[row.kind];
     }
 
@@ -468,13 +503,20 @@ export class Renderer {
     const isDrag = this.dragNode === node;
     const heatGlow = node.heat;
 
-    // identity color (which high-level group the article belongs to) at
-    // rest, blending toward the accent as the node heats up with live
-    // activity — hue says "what kind of topic," the accent shift says
-    // "something is happening here right now"
+    // identity color (which high-level group the article belongs to),
+    // vivid when the node is new and slowly desaturating toward a muted
+    // version of the same hue over its lifetime — fresh attention reads as
+    // saturated, old attention as faded, independent of whatever's
+    // currently happening to it. A live edit still nudges the color
+    // slightly toward the accent, but only slightly — a new node's own
+    // group color is the identity, not an immediate wash of orange.
     const groupRgb = (GROUPS[node.group] || GROUPS.OTHER).color;
-    const heatT = isFocus ? 1 : Math.min(1, heatGlow / 0.35);
-    const coreRgb = heatT > 0 ? mixRgb(groupRgb, COLOR_ACCENT, heatT) : groupRgb;
+    const ageSeconds = Math.max(0, (performance.now() - (node.createdAt || 0)) / 1000);
+    const freshness = Math.exp(-ageSeconds / AGE_SATURATION_TAU);
+    const saturation = MIN_SATURATION + (1 - MIN_SATURATION) * freshness;
+    const agedRgb = saturation < 1 ? mixToGray(groupRgb, saturation) : groupRgb;
+    const heatT = isFocus ? 1 : Math.min(0.4, heatGlow * 0.5);
+    const coreRgb = heatT > 0 ? mixRgb(agedRgb, COLOR_ACCENT, heatT) : agedRgb;
 
     ctx.save();
 
@@ -601,6 +643,30 @@ function mixRgb(a, b, t) {
   const pb = b.split(",").map(Number);
   const mixed = pa.map((v, i) => Math.round(v + (pb[i] - v) * t));
   return mixed.join(", ");
+}
+
+// Draws img center-cropped to fill a size x size square at (x, y) —
+// "object-fit: cover" for canvas, since a Wikipedia thumbnail's aspect
+// ratio is whatever the source image happened to be.
+function drawCoverImage(ctx, img, x, y, size) {
+  const iw = img.naturalWidth;
+  const ih = img.naturalHeight;
+  const scale = Math.max(size / iw, size / ih);
+  const sw = size / scale;
+  const sh = size / scale;
+  const sx = (iw - sw) / 2;
+  const sy = (ih - sh) / 2;
+  ctx.drawImage(img, sx, sy, sw, sh, x, y, size, size);
+}
+
+// Blends an "r, g, b" string toward its own perceived-luminance gray by
+// (1 - saturation) — true desaturation (fades toward gray, not toward a
+// different hue), used for a node's age-based color fade.
+function mixToGray(rgb, saturation) {
+  const [r, g, b] = rgb.split(",").map(Number);
+  const gray = 0.299 * r + 0.587 * g + 0.114 * b;
+  const mix = (c) => Math.round(gray + (c - gray) * saturation);
+  return `${mix(r)}, ${mix(g)}, ${mix(b)}`;
 }
 
 function distanceToSegment(px, py, x1, y1, x2, y2) {

@@ -151,7 +151,15 @@ pointing at the thing you're curious about:
   the wheel.
 - **Hover** a node for its context summary — title plus a plain-language
   explanation, in a large, high-contrast backed panel, not small text
-  floating loose. Hovering also stabilizes that node (and its direct
+  floating loose. After a short dwell (220ms, so a pointer just passing
+  through doesn't fire a request per node), the panel also fetches a small
+  live preview of the actual Wikipedia page — its real thumbnail and the
+  opening line of its extract — from the same public, CORS-open REST
+  summary API (`/api/rest_v1/page/summary/`) that powers Wikipedia's own
+  "Page Previews" hovercards, via `js/previewService.js`. Fetched once per
+  title and cached (including a miss, so a page with no preview doesn't
+  retry on every hover); the panel simply reflows to a text-only layout if
+  no thumbnail exists. Hovering also stabilizes that node (and its direct
   ties) so it holds still long enough to actually read, without pushing
   anything else in the field around — see Physics, below. **Click** to
   open the article on Wikipedia; **drag** to pull it — release to throw
@@ -218,16 +226,21 @@ whatever else is nearby, the way an edit pulse displaces its neighbors,
 then settle into their own positions as individually visible, clickable
 nodes again. To close it, **click anywhere outside its boundary** — same
 as dismissing a popover; clicking among its own members (or on one, to open
-it) leaves it open. This is the field's actual synthesis mechanic: once
-there's enough evidence for a topic, the field stops showing you N separate
-things and shows you one thing, with the individual evidence still one
-click away.
+it) leaves it open. Closing runs the same kind of animation in reverse:
+`_collapseBurst` gives every member a real inward velocity kick toward the
+cluster's centroid (scaled up with member count, same as the expand kick),
+so re-merging reads as one physical motion pulling the group back together
+rather than the shape just silently reappearing. This is the field's actual
+synthesis mechanic: once there's enough evidence for a topic, the field
+stops showing you N separate things and shows you one thing, with the
+individual evidence still one click away.
 
 Verified end-to-end against the live API (Node, no browser): four articles
 known to share `Category:Programming languages`-adjacent categories
 converged from an average ~350px spread down to ~30px while collapsed,
 flew back out to ~200px on expand, and re-collapsed correctly on a second
-toggle.
+toggle; closing again gave every member a measurable inward velocity kick
+and left them closer to the centroid within a few frames.
 
 #### No glow, anywhere
 
@@ -390,10 +403,16 @@ categories by keyword rule (`js/groups.js`), with a plain neutral color for
 anything that doesn't match. This is a coarser, purely-visual layer on top
 of the real per-category clustering above — it doesn't drive any physics —
 so an at-a-glance "what kind of thing is this" reading doesn't require
-zooming into individual category labels. A hot node's color still shifts
-toward the accent orange as it heats up with live activity, so hue reads
-identity and warmth still reads liveness; a legend for the four colors sits
-in the field's bottom-right corner.
+zooming into individual category labels. A hot node's color still nudges
+toward the accent orange as it heats up with live activity, but only
+slightly (`heatT` capped at 0.4) — a fresh node's own group hue is its
+identity, not an immediate wash of orange. Earlier the blend was
+uncapped and scaled almost directly off heat, so a brand-new node's very
+first edit already read as nearly full orange regardless of its actual
+group — a real bug, caught by re-reading `_drawNode`'s color math rather
+than by eyeballing it (no browser in this environment). See Node
+lifecycle, below, for the fresh-node color system this sits inside; a
+legend for the four colors sits in the field's bottom-right corner.
 
 The four hues (plus the neutral fallback) were chosen with the `dataviz`
 skill's palette validator run directly against this app's real background —
@@ -409,6 +428,42 @@ and yellow as small filled dots — mitigated the same way in both cases, by
 the text label every node already carries on hover or once large/active
 enough. Group color here is a supplementary identity cue, not the only way
 to tell a node apart — unlike a real chart, where it would need to be.
+
+### Node lifecycle
+
+Two things make a node's life on the field read as organic rather than
+uniform, both in `js/articleStore.js`:
+
+- **Age-based saturation.** Every node stores its real `createdAt`
+  timestamp. `renderer.js`'s `_drawNode` computes an exponential
+  `freshness` from age (`AGE_SATURATION_TAU: 40` seconds) and uses it to
+  blend the node's group color toward its own perceived-luminance gray
+  (`mixToGray`, a true desaturation — fades toward gray, not toward a
+  different hue), floored at `MIN_SATURATION: 0.12` so a very old node
+  still faintly reads its group identity rather than going fully neutral.
+  A brand-new node is drawn at full saturation — the most vivid version of
+  its own group color — and fades toward muted as it ages, independent of
+  whatever's currently happening to it; a live edit still nudges it toward
+  the accent (see Topic groups, above) but no longer overrides identity.
+- **Random early exit ("flicker").** Not every node's life is governed by
+  the mass/heat decay curve alone — when a node is first created, there's
+  a flat 30% chance (`EARLY_EXIT_CHANCE`) it's given a random extra timer
+  1.5–5 seconds out (`EARLY_EXIT_MIN_MS`/`MAX_MS`) that removes it early,
+  regardless of its normal decay state. A second edit on that article
+  before the timer fires cancels it — real, repeated activity always
+  overrides the random flicker, so this only ever thins out edits that
+  turn out to be one-off noise, never something that's clearly still
+  active. The effect: new nodes don't all persist with the same
+  predictable lifespan — some visibly wink out almost immediately, which
+  reads as closer to the actual unpredictability of anonymous edit
+  traffic than a uniform decay curve would.
+
+Both were verified directly against the store rather than assumed: across
+400 freshly created nodes, 31.3% were assigned an early-exit timer (target
+band 22–38%, accounting for sampling noise around the 30% target); a node
+with an expired timer and no follow-up edit was confirmed removed on the
+next `tick()`, while an identical node that received a second edit first
+had its timer cleared and survived past when it would have fired.
 
 ## Visual system
 
