@@ -25,7 +25,12 @@ export const PHYSICS = {
   // springs: force is proportional to displacement from a rest length, in
   // both directions, so pulling a tied pair apart makes them visibly
   // drift back rather than just stopping being repelled.
-  associationStrength: 7, // spring constant (px/s^2 per px of displacement)
+  // Softened from the initial tuning pass — early testing had the field
+  // moving fast enough that hovering/clicking/dragging a specific node
+  // felt like chasing a moving target. Every force below was scaled down
+  // together (roughly halved) rather than just capping top speed, so the
+  // whole field reads as calmer, not just clamped.
+  associationStrength: 3.5, // spring constant (px/s^2 per px of displacement)
   associationDistanceMin: 55, // rest length for the strongest tie
   associationDistanceMax: 150, // rest length for the weakest tie
 
@@ -33,30 +38,30 @@ export const PHYSICS = {
   // cluster's own body position. Mild while expanded (organizes members
   // loosely around it); strong while collapsed (pulls them into the merged
   // shape). Always weaker than a strong direct association tie.
-  summaryAttraction: 8,
-  summaryCollapseAttraction: 240,
-  clusterBodyCohesion: 26, // spring pulling a cluster's body toward its live member centroid
+  summaryAttraction: 4,
+  summaryCollapseAttraction: 120,
+  clusterBodyCohesion: 14, // spring pulling a cluster's body toward its live member centroid
   clusterBodyMassPerMember: 0.55, // extra inertia per member — bigger clusters feel heavier
 
   // 2. Local repulsion — soft, short-range personal space.
-  repulsionStrength: 24,
+  repulsionStrength: 16,
   repulsionRange: 70, // px beyond radius-sum where repulsion fades to 0
 
-  // 3. Collision — stiffer, shorter-range, corrects actual overlap. Must
-  // reliably win against summaryCollapseAttraction at close range, or a
-  // strongly-collapsing cluster can push a member past its intended
-  // boundary — collisionStrength is kept several times larger than the
-  // strongest attraction in the system for exactly that reason.
+  // 3. Collision — stiffer, shorter-range, corrects actual overlap. Kept
+  // strong (not softened with the rest) — it must reliably win against
+  // summaryCollapseAttraction at close range, or a strongly-collapsing
+  // cluster can push a member past its intended boundary. A gentler field
+  // still needs a firm "never overlap" guarantee.
   collisionStrength: 900,
   collisionPadding: 5,
 
   // 4. Weak global centering — substantially weaker than association
   // springs; just enough to keep the whole field from drifting away.
-  centeringStrength: 0.15,
+  centeringStrength: 0.08,
 
   // Soft boundary spring (not a position clamp) plus a last-resort clamp.
   boundaryMargin: 32,
-  boundaryStrength: 55,
+  boundaryStrength: 30,
 
   // 5. Damping, expressed as a half-life in seconds (frame-rate
   // independent): how long until a node's velocity, absent new force,
@@ -67,9 +72,12 @@ export const PHYSICS = {
   // rearranging afterward instead of snapping still; this is how long the
   // boost takes to decay back to baseline.
   energyBoostHalfLife: 1.4,
-  energyBoostDampingBonus: 1.6, // extra seconds of half-life at full boost
+  energyBoostDampingBonus: 1,
 
-  velocityLimit: 260,
+  // Lowered along with the force magnitudes above — this is the direct
+  // "how fast can anything ever move" ceiling, which is what actually
+  // makes a burst or a throw interruptible rather than a blur to chase.
+  velocityLimit: 120,
 };
 
 /** Turns a half-life (seconds) into the per-substep decay factor:
@@ -302,7 +310,7 @@ export function displaceNeighbors(nodes, source, strength) {
     const radius = 140;
     if (dist > radius) continue;
     const falloff = 1 - dist / radius;
-    const force = strength * falloff * 26;
+    const force = strength * falloff * 14;
     n.vx += (dx / dist) * force;
     n.vy += (dy / dist) * force;
   }

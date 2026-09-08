@@ -4,6 +4,7 @@
 // simulation or state-mutation logic lives here.
 
 import { clusterShapeRadius, clusterHaloRadius } from "./geometry.js";
+import { GROUPS } from "./groups.js";
 
 const COLOR_BG = "#0a0a09";
 const COLOR_FG_RGB = "243, 237, 224";
@@ -233,10 +234,15 @@ export class Renderer {
   }
 
   _drawNodeSummary(store, node) {
-    this._drawSummaryBox(node.x + node.radius + 10, node.y + 18, [
-      node.title,
-      store.describeNode(node),
-    ]);
+    this._drawSummaryBox(
+      node.x,
+      node.y + node.radius + 22,
+      [
+        { text: node.title, kind: "title" },
+        { text: store.describeNode(node), kind: "body" },
+      ],
+      true
+    );
   }
 
   _drawClusterSummary(store, cluster) {
@@ -247,40 +253,97 @@ export class Renderer {
       .map((m) => m.title.toLowerCase())
       .join(" · ");
     const more = cluster.members.length > 3 ? ` +${cluster.members.length - 3} more` : "";
-    this._drawSummaryBox(cx, cy + r + 18, [store.describeCluster(cluster), preview + more]);
+    this._drawSummaryBox(
+      cx,
+      cy + r + 26,
+      [
+        { text: store.describeCluster(cluster), kind: "body" },
+        { text: preview + more, kind: "meta" },
+      ],
+      true
+    );
   }
 
   _drawTieSummary(store, active) {
     const { tie, kind } = active;
     const mx = (tie.a.x + tie.b.x) / 2;
     const my = (tie.a.y + tie.b.y) / 2;
-    this._drawSummaryBox(mx, my - 14, [
-      kind === "topic" ? "TOPIC TIE" : "EVENT TIE",
-      store.describeTie(tie, kind),
-    ]);
+    this._drawSummaryBox(
+      mx,
+      my - 22,
+      [
+        { text: kind === "topic" ? "TOPIC TIE" : "EVENT TIE", kind: "title" },
+        { text: store.describeTie(tie, kind), kind: "body" },
+      ],
+      false
+    );
   }
 
-  // Small canvas-drawn text block, centered under an anchor point — the
-  // one place context-summary text is rendered, so hover panels for a
-  // node, a cluster, or a tie all look and behave the same way.
-  _drawSummaryBox(anchorX, anchorY, lines) {
-    const { ctx, width } = this;
+  // Canvas-drawn context-summary panel — the one place this text renders,
+  // so a node's, a cluster's, and a tie's hover panel all look and behave
+  // the same way: a real backing plate behind large, high-contrast type,
+  // not small text floating loose over whatever's behind it.
+  _drawSummaryBox(anchorX, anchorY, lines, anchorBelow) {
+    const { ctx, width, height } = this;
     ctx.save();
     ctx.textAlign = "center";
-    ctx.textBaseline = "top";
-    const maxWidth = Math.min(300, width - 32);
-    let y = anchorY;
-    lines.forEach((line, i) => {
-      ctx.font = i === 0 ? `600 10px "IBM Plex Mono", monospace` : `400 9px "IBM Plex Mono", monospace`;
-      ctx.fillStyle = i === 0 ? `rgba(${COLOR_FG_RGB}, 0.95)` : `rgba(${COLOR_DIM}, 0.95)`;
-      const text = this._wrapText(ctx, line, maxWidth);
-      for (const wrapped of text) {
-        const x = Math.max(maxWidth / 2 + 16, Math.min(width - maxWidth / 2 - 16, anchorX));
-        ctx.fillText(wrapped, x, y);
-        y += 12;
+
+    const maxTextWidth = Math.min(360, width - 56);
+    const padX = 16;
+    const padY = 12;
+    const lineHeight = { title: 21, body: 17, meta: 15 };
+    const font = {
+      title: `600 15px "IBM Plex Mono", monospace`,
+      body: `400 13px "IBM Plex Mono", monospace`,
+      meta: `400 11px "IBM Plex Mono", monospace`,
+    };
+    const color = {
+      title: `rgba(${COLOR_FG_RGB}, 1)`,
+      body: `rgba(${COLOR_FG_RGB}, 0.88)`,
+      meta: `rgba(${COLOR_DIM}, 0.95)`,
+    };
+
+    // first pass: wrap and measure every line so the backing panel can be
+    // sized to fit before anything is drawn
+    const rows = [];
+    let blockWidth = 0;
+    for (const { text, kind } of lines) {
+      if (!text) continue;
+      ctx.font = font[kind];
+      for (const wrapped of this._wrapText(ctx, text, maxTextWidth)) {
+        blockWidth = Math.max(blockWidth, ctx.measureText(wrapped).width);
+        rows.push({ text: wrapped, kind });
       }
-      y += 2;
-    });
+    }
+    if (!rows.length) {
+      ctx.restore();
+      return;
+    }
+
+    const blockHeight = rows.reduce((s, r) => s + lineHeight[r.kind], 0);
+    const boxWidth = blockWidth + padX * 2;
+    const boxHeight = blockHeight + padY * 2;
+
+    const boxCenterX = Math.max(boxWidth / 2 + 10, Math.min(width - boxWidth / 2 - 10, anchorX));
+    let boxTop = anchorBelow ? anchorY : anchorY - boxHeight;
+    boxTop = Math.max(8, Math.min(height - boxHeight - 8, boxTop));
+    const boxLeft = boxCenterX - boxWidth / 2;
+
+    ctx.fillStyle = "rgba(8, 8, 7, 0.92)";
+    ctx.fillRect(boxLeft, boxTop, boxWidth, boxHeight);
+    ctx.strokeStyle = `rgba(${COLOR_FG_RGB}, 0.16)`;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(boxLeft + 0.5, boxTop + 0.5, boxWidth - 1, boxHeight - 1);
+
+    ctx.textBaseline = "top";
+    let y = boxTop + padY;
+    for (const row of rows) {
+      ctx.font = font[row.kind];
+      ctx.fillStyle = color[row.kind];
+      ctx.fillText(row.text, boxCenterX, y);
+      y += lineHeight[row.kind];
+    }
+
     ctx.restore();
   }
 
@@ -392,15 +455,23 @@ export class Renderer {
     const isDrag = this.dragNode === node;
     const heatGlow = node.heat;
 
+    // identity color (which high-level group the article belongs to) at
+    // rest, blending toward the accent as the node heats up with live
+    // activity — hue says "what kind of topic," the accent shift says
+    // "something is happening here right now"
+    const groupRgb = (GROUPS[node.group] || GROUPS.OTHER).color;
+    const heatT = isFocus ? 1 : Math.min(1, heatGlow / 0.35);
+    const coreRgb = heatT > 0 ? mixRgb(groupRgb, COLOR_ACCENT, heatT) : groupRgb;
+
     ctx.save();
 
-    // glow for hot / large nodes
+    // glow for hot / large nodes, tinted the same way as the core
     if (heatGlow > 0.05 || node.radius > 10) {
       const glowR = node.radius * (2.2 + heatGlow * 1.6);
       const grad = ctx.createRadialGradient(node.x, node.y, 0, node.x, node.y, glowR);
       const glowAlpha = Math.min(0.22, heatGlow * 0.28 + node.mass * 0.06) * dim;
-      grad.addColorStop(0, `rgba(${COLOR_ACCENT}, ${glowAlpha})`);
-      grad.addColorStop(1, `rgba(${COLOR_ACCENT}, 0)`);
+      grad.addColorStop(0, `rgba(${coreRgb}, ${glowAlpha})`);
+      grad.addColorStop(1, `rgba(${coreRgb}, 0)`);
       ctx.fillStyle = grad;
       ctx.beginPath();
       ctx.arc(node.x, node.y, glowR, 0, Math.PI * 2);
@@ -409,11 +480,9 @@ export class Renderer {
 
     // core dot
     const opacity = node.opacity * dim;
-    const coreColor =
-      heatGlow > 0.15 || isFocus ? `rgba(${COLOR_ACCENT}, ${opacity})` : `rgba(${COLOR_FG_RGB}, ${opacity})`;
     ctx.beginPath();
     ctx.arc(node.x, node.y, Math.max(node.radius, 1.4), 0, Math.PI * 2);
-    ctx.fillStyle = coreColor;
+    ctx.fillStyle = `rgba(${coreRgb}, ${opacity})`;
     ctx.fill();
 
     if (isDrag) {
@@ -520,6 +589,14 @@ export class Renderer {
     }
     return false;
   }
+}
+
+// Linearly blends two "r, g, b" strings by t (0 = a, 1 = b).
+function mixRgb(a, b, t) {
+  const pa = a.split(",").map(Number);
+  const pb = b.split(",").map(Number);
+  const mixed = pa.map((v, i) => Math.round(v + (pb[i] - v) * t));
+  return mixed.join(", ");
 }
 
 function distanceToSegment(px, py, x1, y1, x2, y2) {

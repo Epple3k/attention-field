@@ -186,6 +186,39 @@ body {
   opacity: 0.7;
 }
 
+.field__legend {
+  position: absolute;
+  bottom: 12px;
+  right: 26px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  pointer-events: none;
+}
+
+.field__legend-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  color: var(--fg-faint);
+  white-space: nowrap;
+}
+
+.field__legend-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+
+@media (max-width: 900px) {
+  .field__legend {
+    display: none;
+  }
+}
+
 /* ---------- Controls ---------- */
 
 .ctrl {

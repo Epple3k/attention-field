@@ -2,11 +2,24 @@ import { connectStream } from "./eventStream.js";
 import { ArticleStore, RANGE_STEPS, MODE_STEPS, FILTER_STEPS } from "./articleStore.js";
 import { Renderer } from "./renderer.js";
 import { tieKey } from "./geometry.js";
+import { GROUPS } from "./groups.js";
 
 const canvas = document.getElementById("field");
 const fieldWrap = document.querySelector(".field-wrap");
 const renderer = new Renderer(canvas);
 const store = new ArticleStore();
+
+// group color key — built once from the same GROUPS the renderer colors
+// nodes from, so the legend can never drift out of sync with the field
+const legendEl = document.getElementById("group-legend");
+for (const key of Object.keys(GROUPS)) {
+  if (key === "OTHER") continue; // neutral fallback earns no legend slot
+  const { label, color } = GROUPS[key];
+  const item = document.createElement("span");
+  item.className = "field__legend-item";
+  item.innerHTML = `<span class="field__legend-dot" style="background: rgb(${color})"></span>${label.toUpperCase()}`;
+  legendEl.appendChild(item);
+}
 
 const dom = {
   clock: document.getElementById("clock-readout"),

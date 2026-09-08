@@ -27,9 +27,11 @@ endpoint from the browser — no backend required.
   each incoming edit affects the visualization.
 - **Scroll or click** RANGE, MODE, or FILTER in the footer to step through
   their values, like a selector switch on an instrument.
-- **Hover** a node for its context summary; **click** to open the article on
-  Wikipedia; **drag** to pull it — release to throw it back into the
-  simulation (see Physics, below).
+- **Hover** a node for its context summary — title plus a plain-language
+  explanation, in a large, high-contrast backed panel, not small text
+  floating loose; **click** to open the article on Wikipedia; **drag** to
+  pull it — release to throw it back into the simulation (see Physics,
+  below).
 - **Hover** an association tie (the thin lines between nodes) to see why
   the two articles are connected; **click** to pin that focus open.
 - **Hover** a merged cluster shape for a preview of its members; **click**
@@ -130,6 +132,14 @@ match the shape suggested during design: `associationStrength`,
 `centeringStrength`, `dampingHalfLife`, `velocityLimit`, and so on) — no
 magic numbers scattered through the force code itself.
 
+The first tuning pass was too energetic — fast enough that hovering,
+clicking, or dragging a specific node felt like chasing a moving target.
+Every attraction force and the global `velocityLimit` were scaled down
+together (roughly halved), rather than just capping top speed, so the
+whole field reads as calmer rather than merely clamped; collision strength
+was deliberately left alone, since a gentler field still needs a firm
+"never overlap" guarantee.
+
 Force hierarchy, strongest to weakest:
 
 1. **Association springs** — every topic tie and event tie is a real
@@ -175,6 +185,33 @@ control article; members stayed 40+px from their cluster's body center
 while expanded rather than collapsing onto it; and no pairwise node overlap
 remained after a 5-second settle.
 
+### Topic groups
+
+Every node is also colored by one of four high-level groups — **Science &
+Technology**, **Geography & Nature**, **Arts & Culture**, **Politics,
+Society & Sport** — classified from its already-fetched Wikipedia
+categories by keyword rule (`js/groups.js`), with a plain neutral color for
+anything that doesn't match. This is a coarser, purely-visual layer on top
+of the real per-category clustering above — it doesn't drive any physics —
+so an at-a-glance "what kind of thing is this" reading doesn't require
+zooming into individual category labels. A hot node's color still shifts
+toward the accent orange as it heats up with live activity, so hue reads
+identity and warmth still reads liveness; a legend for the four colors sits
+in the field's bottom-right corner.
+
+The four hues (plus the neutral fallback) were chosen with the `dataviz`
+skill's palette validator run directly against this app's real background
+(`#0a0a09`), not eyeballed. Worth being upfront about a real limit it
+surfaced: because any two node colors can end up next to each other in this
+field (it's a scatter, not a fixed-order bar chart), full colorblind safety
+for *every* pair tops out at 3 hues with this palette — a documented
+property of the underlying 8-hue set, not something reordering fixes. A
+4th hue (the warm red) was kept anyway, accepting one imperfect pair
+(red vs. yellow, ΔE 13 against a 15 target — a near miss, not a collision)
+because text labels remain the reliable disambiguator on hover, and because
+group color here is a supplementary mood cue, not the only way to identify
+a node — unlike a real chart, where it would be.
+
 ### Synthesis layer
 
 Three things read the field's current topology back to you, so it's never
@@ -206,6 +243,8 @@ Physics (js/physics.js)                   ← the force model: association
 Geometry (js/geometry.js)                 ← shared radius/strength formulas
      ↓                                       used by physics, the store, and
      ↓                                       the renderer alike
+Groups (js/groups.js)                     ← high-level topic classification
+     ↓                                       + validated color palette
 Renderer (js/renderer.js)
      ↓
 main.js — wiring, HUD, input, drag + tie interaction
@@ -218,10 +257,12 @@ HTML/CSS/JS with a `<canvas>` field.
 
 Live connection, ~60 concurrent article nodes, pulse-on-edit, decay-when-idle,
 a wheel-controlled GAIN, functional RANGE/MODE/FILTER, real Wikipedia-category
-topic clustering, a proper spring/repulsion/collision/centering physics model
-(see Physics) with draggable nodes and interactive association ties (hover
-for an explanation, click to pin), merged/collapsible cluster shapes with
-real burst-and-resettle physics, same-editor event links, a synthesis-level
-FOCUS readout, ambient field-energy glow, and the core visual identity are in
-place. Pageview context (for genuine 24h history), trails, sound, and a
-richer article-inspection panel remain planned second-iteration additions.
+topic clustering, a tuned-for-calm spring/repulsion/collision/centering
+physics model (see Physics) with draggable nodes and interactive association
+ties (hover for a large, legible explanation panel, click to pin),
+merged/collapsible cluster shapes with real burst-and-resettle physics,
+same-editor event links, high-level topic-group color coding with a legend,
+a synthesis-level FOCUS readout, ambient field-energy glow, and the core
+visual identity are in place. Pageview context (for genuine 24h history),
+trails, sound, and a richer article-inspection panel remain planned
+second-iteration additions.

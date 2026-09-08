@@ -18,6 +18,7 @@ import {
 } from "./physics.js";
 import { clusterShapeRadius, mapAssociationStrength, clamp01 } from "./geometry.js";
 import { fetchCategoriesBatch } from "./categoryService.js";
+import { classifyGroup, GROUPS } from "./groups.js";
 
 const MAX_NODES = 60;
 const TAU_HEAT = 5.5; // seconds — burst decay (drives pulse glow, mode-independent)
@@ -152,8 +153,8 @@ export class ArticleStore {
     const dy = tie.b.y - tie.a.y;
     const dist = Math.hypot(dx, dy) || 1;
     const angle = Math.atan2(dy, dx);
-    applyImpulse(tie.a, angle + Math.PI, 12);
-    applyImpulse(tie.b, angle, 12);
+    applyImpulse(tie.a, angle + Math.PI, 6);
+    applyImpulse(tie.b, angle, 6);
     this.boostEnergy(0.3);
   }
 
@@ -175,7 +176,7 @@ export class ArticleStore {
     cy /= members.length;
 
     const allNodes = [...this.nodes.values()];
-    const burstForce = 220 + members.length * 14;
+    const burstForce = 90 + members.length * 6;
     members.forEach((m, i) => {
       const dx = m.x - cx;
       const dy = m.y - cy;
@@ -183,7 +184,7 @@ export class ArticleStore {
       const angle = dist > 2 ? Math.atan2(dy, dx) : (i / members.length) * Math.PI * 2;
       m.vx += Math.cos(angle) * burstForce;
       m.vy += Math.sin(angle) * burstForce;
-      displaceNeighbors(allNodes, m, 1.5);
+      displaceNeighbors(allNodes, m, 0.8);
     });
   }
 
@@ -433,7 +434,9 @@ export class ArticleStore {
     const recency =
       idleSeconds < 5 ? "moments ago" : idleSeconds < 90 ? `${Math.round(idleSeconds)}s ago` : `${Math.round(idleSeconds / 60)}m ago`;
     const editWord = node.edits === 1 ? "edit" : "edits";
-    return `Wikipedia article — ${node.edits} ${editWord} observed, last active ${recency}.`;
+    const groupLabel = node.categoriesLoaded ? GROUPS[node.group].label : null;
+    const groupPart = groupLabel && node.group !== "OTHER" ? ` Grouped under ${groupLabel}.` : "";
+    return `Wikipedia article — ${node.edits} ${editWord} observed, last active ${recency}.${groupPart}`;
   }
 
   describeCluster(cluster) {
@@ -501,6 +504,7 @@ export class ArticleStore {
         if (!node) continue; // decayed away before the lookup returned
         node.categories = results.get(title) || new Set();
         node.categoriesLoaded = true;
+        node.group = classifyGroup(node.categories);
       }
       this._recomputeClusters();
     } catch {
@@ -644,6 +648,7 @@ export class ArticleStore {
       rangeCount: 0,
       categories: null,
       categoriesLoaded: false,
+      group: "OTHER",
       topicDegree: 0,
       clustered: false,
       lastActive: performance.now(),
