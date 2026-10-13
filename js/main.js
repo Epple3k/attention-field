@@ -16,6 +16,11 @@ const store = new ArticleStore();
 // MODE ACTIVITY, FILTER ALL) and every edit affects the field at unity
 // gain, same as the old GAIN=50 default did.
 const GAIN = 50;
+// An embedded, non-hover portfolio thumbnail collects a brief real snapshot,
+// then stops network activity and animation. The full project stays live.
+const IS_STATIC_PORTFOLIO_PREVIEW =
+  new URLSearchParams(window.location.search).get("portfolioStatic") === "1";
+const STATIC_PREVIEW_DURATION_MS = 20000;
 
 // The information dialog is opt-in via ABOUT, never an interruption at load.
 // It starts hidden in the HTML so even the first paint shows the live field.
@@ -464,7 +469,7 @@ canvas.addEventListener("click", () => {
 // ---------------------------------------------------------------------
 // Live stream connection
 // ---------------------------------------------------------------------
-connectStream({
+const disconnectStream = connectStream({
   onOpen: () => {
     dom.liveDot.classList.add("is-live");
     dom.liveLabel.textContent = "LIVE";
@@ -477,6 +482,14 @@ connectStream({
     store.registerEdit(edit, GAIN);
   },
 });
+
+if (IS_STATIC_PORTFOLIO_PREVIEW) {
+  window.setTimeout(() => {
+    disconnectStream();
+    dom.liveDot.classList.remove("is-live");
+    dom.liveLabel.textContent = "FIELD SNAPSHOT";
+  }, STATIC_PREVIEW_DURATION_MS);
+}
 
 // ---------------------------------------------------------------------
 // Header clock
@@ -496,6 +509,7 @@ setInterval(updateClock, 1000);
 // Main loop
 // ---------------------------------------------------------------------
 let lastTime = performance.now();
+const staticPreviewStopAt = lastTime + STATIC_PREVIEW_DURATION_MS;
 
 // Delayed slightly rather than fired the instant the page loads — that's
 // the same moment the first batch of brand-new nodes' own category fetches
@@ -503,7 +517,7 @@ let lastTime = performance.now();
 // them all onto Wikipedia at once reduces the odds any of them hit a
 // transient failure. Re-checked periodically after that (refreshCurrentEvents
 // itself no-ops if the cache is still fresh).
-setTimeout(refreshCurrentEvents, 15000);
+if (!IS_STATIC_PORTFOLIO_PREVIEW) setTimeout(refreshCurrentEvents, 15000);
 let currentEventsCheckAccum = 0;
 
 function frame(now) {
@@ -575,7 +589,9 @@ function frame(now) {
     renderIndex();
   }
 
-  requestAnimationFrame(frame);
+  if (!IS_STATIC_PORTFOLIO_PREVIEW || now < staticPreviewStopAt) {
+    requestAnimationFrame(frame);
+  }
 }
 
 requestAnimationFrame(frame);
