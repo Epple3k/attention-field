@@ -17,45 +17,29 @@ const store = new ArticleStore();
 // gain, same as the old GAIN=50 default did.
 const GAIN = 50;
 
-// ---------------------------------------------------------------------
-// Intro overlay — shown automatically on a visitor's first load (per
-// browser, via localStorage), reachable afterward any time via the
-// header's ABOUT button. Live data starts flowing immediately underneath
-// it regardless of whether it's showing, so nothing is lost by reading it.
-// ---------------------------------------------------------------------
-const SEEN_INTRO_KEY = "attentionField.seenIntro";
+// The information dialog is opt-in via ABOUT, never an interruption at load.
+// It starts hidden in the HTML so even the first paint shows the live field.
 const introEl = document.getElementById("intro");
 const introEnterBtn = document.getElementById("intro-enter");
 const aboutBtn = document.getElementById("about-btn");
 
-function hasSeenIntro() {
-  try {
-    return localStorage.getItem(SEEN_INTRO_KEY) === "1";
-  } catch {
-    return false; // private/blocked storage — just show it every visit
-  }
-}
-
-function markIntroSeen() {
-  try {
-    localStorage.setItem(SEEN_INTRO_KEY, "1");
-  } catch {
-    // ignore — nothing to persist, intro just reappears next visit
-  }
-}
-
 function showIntro() {
   introEl.classList.remove("is-hidden");
+  introEnterBtn.focus();
 }
 
 function hideIntro() {
   introEl.classList.add("is-hidden");
-  markIntroSeen();
+  aboutBtn.focus();
 }
 
-if (hasSeenIntro()) hideIntro();
 introEnterBtn.addEventListener("click", hideIntro);
 aboutBtn.addEventListener("click", showIntro);
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !introEl.classList.contains("is-hidden")) {
+    hideIntro();
+  }
+});
 
 // group color key — built once from the same GROUPS the renderer colors
 // nodes from, so the legend can never drift out of sync with the field
