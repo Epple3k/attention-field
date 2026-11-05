@@ -34,7 +34,7 @@ export const PHYSICS = {
   // springs: force is proportional to displacement from a rest length, in
   // both directions, so pulling a tied pair apart makes them visibly
   // drift back rather than just stopping being repelled.
-  associationStrength: 2.5, // spring constant (px/s^2 per px of displacement)
+  associationStrength: 2.9, // spring constant (px/s^2 per px of displacement)
   associationDistanceMin: 55, // rest length for the strongest tie
   associationDistanceMax: 150, // rest length for the weakest tie
 
@@ -42,17 +42,17 @@ export const PHYSICS = {
   // cluster's own body position. Mild while expanded (organizes members
   // loosely around it); strong while collapsed (pulling them into the
   // merged shape). Always weaker than a strong direct association tie.
-  summaryAttraction: 3,
+  summaryAttraction: 4,
   summaryCollapseAttraction: 90,
-  clusterBodyCohesion: 10, // spring pulling a cluster's body toward its live member centroid
+  clusterBodyCohesion: 12, // spring pulling a cluster's body toward its live member centroid
   clusterBodyMassPerMember: 0.55, // extra inertia per member — bigger clusters feel heavier
 
   // 2. Local repulsion — soft, short-range personal space. A small amount
   // of built-in velocity damping (repulsionDamping) keeps it from ever
   // reading as a spring in its own right.
-  repulsionStrength: 12,
-  repulsionRange: 70, // px beyond radius-sum where repulsion fades to 0
-  repulsionDamping: 0.25, // fraction of closing speed removed per contact
+  repulsionStrength: 15,
+  repulsionRange: 78, // px beyond radius-sum where repulsion fades to 0
+  repulsionDamping: 0.2, // fraction of closing speed removed per contact
 
   // 3. Collision — a soft, heavily-damped "squish" rather than a spring:
   // most of what stops two overlapping bodies is removing their closing
@@ -61,34 +61,32 @@ export const PHYSICS = {
   // as soft-body damping instead of a bounce, while collisionDamping's
   // near-total kill of approach velocity still reliably prevents overlap.
   collisionStrength: 260,
-  collisionDamping: 0.88, // fraction of closing speed removed per contact
+  collisionDamping: 0.84, // fraction of closing speed removed per contact
   collisionPadding: 5,
   maxPairForce: 55, // caps any single pairwise force's per-frame velocity change — forces move nodes gradually rather than in one sudden jolt
 
   // 4. Weak global centering — substantially weaker than association
   // springs; just enough to keep the whole field from drifting away.
-  centeringStrength: 0.05,
+  centeringStrength: 0.065,
 
   // Soft boundary spring (not a position clamp) plus a last-resort clamp.
   boundaryMargin: 32,
   boundaryStrength: 20,
 
-  // 5. Damping, expressed as a half-life in seconds (frame-rate
-  // independent): how long until a node's velocity, absent new force,
-  // drops to half. Kept short — nodes should lose velocity quickly once
-  // displaced, so the field settles and stays readable rather than
-  // carrying momentum around.
-  dampingHalfLife: 0.28,
+  // 5. Damping is a frame-rate-independent velocity half-life. A slightly
+  // longer half-life keeps springs and drag releases feeling weighty,
+  // while remaining short enough for a readable, self-settling field.
+  dampingHalfLife: 0.44,
   // Interactions (drag release, cluster expand, tie activation, a new node
   // appearing) briefly extend that half-life so the graph keeps visibly
   // rearranging afterward instead of snapping still; this is how long the
   // boost takes to decay back to baseline.
-  energyBoostHalfLife: 1.4,
-  energyBoostDampingBonus: 0.6,
+  energyBoostHalfLife: 1.8,
+  energyBoostDampingBonus: 0.5,
 
   // The hard "how fast can anything ever move" ceiling — low enough that
   // nothing can shoot across the field in one frame's worth of force.
-  velocityLimit: 70,
+  velocityLimit: 86,
 
   // Hover stabilization (see articleStore._updateStability). stabilityMass
   // is how much extra effective mass full stability adds (so a stabilized

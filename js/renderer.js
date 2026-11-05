@@ -52,6 +52,7 @@ export class Renderer {
     this._drawGrid();
 
     const allNodes = store.getNodes();
+    const retiringNodes = store.getRetiringNodes();
     const rings = store.getRings();
     const links = store.getLinks();
     const topicLinks = store.getTopicLinks();
@@ -60,8 +61,14 @@ export class Renderer {
     // members of a collapsed cluster are no longer individually rendered —
     // the merged shape stands in for all of them
     const hidden = new Set();
+    const merging = new Map();
     for (const c of clusters) {
-      if (c.collapsed) for (const m of c.members) hidden.add(m);
+      if (!c.collapsed) continue;
+      const merged = clusterPresence(c);
+      for (const m of c.members) {
+        if (merged >= 0.995) hidden.add(m);
+        else merging.set(m, 1 - merged);
+      }
     }
     this.hiddenNodes = hidden;
     const nodes = allNodes.filter((n) => !hidden.has(n));
@@ -89,13 +96,20 @@ export class Renderer {
     }
     for (const ring of rings) {
       if (hidden.has(ring.node)) continue;
-      this._drawRing(ring, dim);
+      this._drawRing(ring, dim * (merging.get(ring.node) ?? 1));
+    }
+
+    // Departing nodes still coast along their last velocity, but are no
+    // longer active click targets or structural anchors.
+    for (const node of retiringNodes) {
+      if (!node.retiredFromCollapsedCluster) this._drawNode(node, dim, false);
     }
 
     // sort so larger / hotter nodes paint last (on top)
     nodes.sort((a, b) => a.mass + a.heat - (b.mass + b.heat));
     for (const node of nodes) {
-      this._drawNode(node, isFocusNode(node) ? 1 : dim, isFocusNode(node));
+      const visibility = merging.get(node) ?? 1;
+      this._drawNode(node, (isFocusNode(node) ? 1 : dim) * visibility, isFocusNode(node));
     }
 
     for (const cluster of clusters) {
@@ -143,6 +157,7 @@ export class Renderer {
   // dots don't just get lost in the rest of the field once they've
   // burst apart.
   _drawClusterBoundary(cluster, dim = 1) {
+    dim *= clusterPresence(cluster);
     const members = cluster.members;
     if (members.length < 3) return;
     const { ctx } = this;
@@ -172,6 +187,7 @@ export class Renderer {
 
   _drawClusterLabel(cluster, dim = 1) {
     if (cluster.members.length < 3) return;
+    dim *= clusterPresence(cluster);
     const { ctx } = this;
     const { cx, cy, maxR } = this._clusterExtent(cluster);
     const r = maxR + 14;
@@ -196,6 +212,7 @@ export class Renderer {
   // "made of N things"), rotating slowly, that brightens with the members'
   // aggregate live activity — a real aggregated pulse, not decoration.
   _drawClusterShape(cluster, dim = 1) {
+    dim *= clusterPresence(cluster);
     const { ctx } = this;
     const { cx, cy } = this._clusterCentroid(cluster);
     const n = cluster.members.length;
@@ -419,7 +436,11 @@ export class Renderer {
   _drawTopicLink(link, dim = 1, isActive = false) {
     const { ctx } = this;
     const { a, b } = link;
+    const linkArrival = smoothstep01((performance.now() - (link.bornAt ?? 0)) / 950);
+    const presence = Math.min(nodePresence(a), nodePresence(b)) * linkArrival;
+    if (presence <= 0.005) return;
     ctx.save();
+    ctx.globalAlpha = presence;
     ctx.beginPath();
     ctx.moveTo(a.x, a.y);
     ctx.lineTo(b.x, b.y);
@@ -456,7 +477,7 @@ export class Renderer {
     const t = age / 0.9;
     if (t >= 1) return;
     const r = node.radius + 4 + t * 46 * (0.5 + strength);
-    const alpha = (1 - t) * 0.55 * strength * dim;
+    const alpha = (1 - t) * 0.55 * strength * dim * nodePresence(node);
     ctx.save();
     ctx.beginPath();
     ctx.arc(node.x, node.y, Math.max(r, 0), 0, Math.PI * 2);
@@ -470,13 +491,15 @@ export class Renderer {
     const { ctx } = this;
     const { a, b, age, life } = link;
     const t = age / life;
-    if (t >= 1) return;
+    const presence = Math.min(nodePresence(a), nodePresence(b));
+    if (t >= 1 || presence <= 0.005) return;
 
     // fades in fast, lingers, fades out — a signal arriving then settling
     const envelope = t < 0.1 ? t / 0.1 : 1 - (t - 0.1) / 0.9;
     const alpha = Math.max(0, envelope) * 0.3 * dim;
 
     ctx.save();
+    ctx.globalAlpha = presence;
     ctx.beginPath();
     ctx.moveTo(a.x, a.y);
     ctx.lineTo(b.x, b.y);
@@ -517,16 +540,35 @@ export class Renderer {
     const agedRgb = saturation < 1 ? mixToGray(groupRgb, saturation) : groupRgb;
     const heatT = isFocus ? 1 : Math.min(0.4, heatGlow * 0.5);
     const coreRgb = heatT > 0 ? mixRgb(agedRgb, COLOR_ACCENT, heatT) : agedRgb;
+    const presence = nodePresence(node);
+    if (presence <= 0.005) return;
 
     ctx.save();
+    ctx.globalAlpha = presence;
 
     // core shape — a triangle marks a heavily-read (trending) page, a
     // circle marks everything driven by live edit activity; see
     // trendingService.js/articleStore.js. Sized off the same node.radius
     // either way, so the two kinds sit naturally in the same field and the
     // same merged cluster shapes without any special-casing elsewhere.
-    const shapeR = Math.max(node.radius, 1.4);
+    const shapeR = Math.max(node.radius * (0.8 + 0.2 * presence), 1.4);
     const opacity = node.opacity * dim;
+
+    // A restrained direction mark only when the node is genuinely in
+    // motion. It disappears as velocity decays, never faking movement.
+    const speed = Math.hypot(node.vx, node.vy);
+    if (speed > 18 && !isDrag) {
+      const ux = node.vx / speed;
+      const uy = node.vy / speed;
+      const length = Math.min(15, (speed - 18) * 0.2);
+      ctx.beginPath();
+      ctx.moveTo(node.x - ux * (shapeR + 3), node.y - uy * (shapeR + 3));
+      ctx.lineTo(node.x - ux * (shapeR + 3 + length), node.y - uy * (shapeR + 3 + length));
+      ctx.strokeStyle = `rgba(${agedRgb}, ${Math.min(0.16, (speed - 18) * 0.0026) * dim})`;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+
     ctx.beginPath();
     if (node.isTrending) {
       trianglePath(ctx, node.x, node.y, shapeR * 1.25);
@@ -582,6 +624,7 @@ export class Renderer {
     let closest = null;
     let closestDist = Infinity;
     for (const node of nodes) {
+      if (nodePresence(node) < 0.25) continue;
       const d = Math.hypot(node.x - x, node.y - y);
       const r = Math.max(node.radius, 6) + 4;
       if (d <= r && d < closestDist) {
@@ -657,6 +700,21 @@ export class Renderer {
 // at (x, y) — the trending-node marker. Left as an open path (no
 // beginPath/fill/stroke) so the caller controls those, same convention as
 // ctx.arc.
+// Shared easing for node arrivals, structural arrivals, and their fadeouts.
+function smoothstep01(value) {
+  const t = Math.max(0, Math.min(1, value));
+  return t * t * (3 - 2 * t);
+}
+
+function nodePresence(node) {
+  const arrival = smoothstep01((performance.now() - (node.createdAt ?? 0)) / 1400);
+  return arrival * (node.exitAlpha ?? 1);
+}
+
+function clusterPresence(cluster) {
+  return smoothstep01((performance.now() - (cluster.createdAt ?? 0)) / 1100);
+}
+
 function trianglePath(ctx, x, y, r) {
   for (let i = 0; i < 3; i++) {
     const angle = -Math.PI / 2 + (i / 3) * Math.PI * 2;
