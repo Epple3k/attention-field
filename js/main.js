@@ -59,11 +59,8 @@ for (const key of Object.keys(GROUPS)) {
 }
 
 const dom = {
-  clock: document.getElementById("clock-readout"),
-  date: document.getElementById("date-readout"),
   liveDot: document.getElementById("live-dot"),
   liveLabel: document.getElementById("live-label"),
-  focusValue: document.getElementById("focus-value"),
 };
 
 // ---------------------------------------------------------------------
@@ -492,20 +489,6 @@ if (IS_STATIC_PORTFOLIO_PREVIEW) {
 }
 
 // ---------------------------------------------------------------------
-// Header clock
-// ---------------------------------------------------------------------
-function updateClock() {
-  const now = new Date();
-  dom.clock.textContent = now.toLocaleTimeString("en-GB", { hour12: false });
-  dom.date.textContent = now
-    .toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })
-    .toUpperCase()
-    .replace(/,/g, "");
-}
-updateClock();
-setInterval(updateClock, 1000);
-
-// ---------------------------------------------------------------------
 // Main loop
 // ---------------------------------------------------------------------
 let lastTime = performance.now();
@@ -564,16 +547,6 @@ function frame(now) {
     : renderer.hoverNode || renderer.hoverTie || renderer.hoverCluster
       ? "pointer"
       : "default";
-
-  const namedClusters = store.getClusters().filter((c) => c.members.length >= 3);
-  if (namedClusters.length) {
-    namedClusters.sort((a, b) => b.members.length - a.members.length);
-    dom.focusValue.textContent = namedClusters[0].label.toUpperCase();
-    dom.focusValue.classList.remove("is-scanning");
-  } else {
-    dom.focusValue.textContent = "SCANNING";
-    dom.focusValue.classList.add("is-scanning");
-  }
 
   currentEventsCheckAccum += dt;
   if (currentEventsCheckAccum > 60) {

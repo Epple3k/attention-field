@@ -43,37 +43,36 @@
     </div>
   </div>
 
-  <header class="hud hud--top">
-    <div class="hud__block">
-      <div class="hud__title-row">
-        <img class="hud__logo" src="assets/logo.png" alt="" />
-        <div class="hud__title">ATTENTION FIELD</div>
-        <button class="hud__about" id="about-btn" aria-label="About this project">ABOUT</button>
-      </div>
-      <div class="hud__sub" id="date-readout">— — —</div>
+  <div class="field-tools" aria-label="Live field utilities">
+    <div class="field-tools__live" role="status" aria-live="polite">
+      <span class="hud__dot" id="live-dot" aria-hidden="true"></span>
+      <span id="live-label">CONNECTING</span>
     </div>
-    <div class="hud__focus">
-      <div class="hud__focus-label">FOCUS</div>
-      <div class="hud__focus-value" id="focus-value">SCANNING</div>
-    </div>
-    <div class="hud__block hud__block--right">
-      <div class="hud__live">
-        <span class="hud__dot" id="live-dot"></span>
-        <span id="live-label">CONNECTING</span>
-      </div>
-      <div class="hud__clock" id="clock-readout">00:00:00</div>
-    </div>
-  </header>
+    <button class="field-tools__about" id="about-btn" type="button" aria-label="About Attention Field">ABOUT <span aria-hidden="true">↗</span></button>
+  </div>
 
   <main class="views" id="views">
     <section class="view view--field is-active" id="view-field">
       <div class="field-wrap">
         <canvas id="field"></canvas>
-        <div class="field__caption">
-          LIVE DATA FIELD — EN.WIKIPEDIA.ORG<br />
-          <span class="field__caption-sub">CIRCLE — LIVE EDIT ACTIVITY · TRIANGLE — TOP-VIEWED TODAY · DASHED OUTLINE — EXPANDED CLUSTER BOUNDARY · ORANGE PULSE — SAME EDITOR, 90S · POLYGON SHAPES — MERGED CLUSTERS, CLICK TO OPEN</span>
+        <div class="field__footer">
+          <div class="field__source">EN.WIKIPEDIA.ORG <span aria-hidden="true">/</span> LIVE EDIT STREAM</div>
+          <details class="field__key">
+            <summary class="field__key-toggle">FIELD KEY <span class="field__key-toggle-icon" aria-hidden="true"></span></summary>
+            <div class="field__key-panel">
+              <p class="field__key-heading">READING THE FIELD</p>
+              <div class="field__key-rules">
+                <div class="field__key-rule"><span class="field__glyph field__glyph--circle" aria-hidden="true"></span><span>Circle <span class="field__key-explainer">/ Live edit</span></span></div>
+                <div class="field__key-rule"><span class="field__glyph field__glyph--triangle" aria-hidden="true"></span><span>Triangle <span class="field__key-explainer">/ Top-viewed</span></span></div>
+                <div class="field__key-rule"><span class="field__glyph field__glyph--line" aria-hidden="true"></span><span>Line <span class="field__key-explainer">/ Shared category</span></span></div>
+                <div class="field__key-rule"><span class="field__glyph field__glyph--pulse" aria-hidden="true"></span><span>Orange pulse <span class="field__key-explainer">/ Same editor, 90s</span></span></div>
+                <div class="field__key-rule"><span class="field__glyph field__glyph--cluster" aria-hidden="true"></span><span>Shape <span class="field__key-explainer">/ Cluster, click to open</span></span></div>
+              </div>
+              <p class="field__key-heading field__key-heading--topics">TOPIC COLORS</p>
+              <div class="field__legend" id="group-legend" aria-label="Topic group color key"></div>
+            </div>
+          </details>
         </div>
-        <div class="field__legend" id="group-legend" aria-label="Topic group color key"></div>
       </div>
     </section>
 
