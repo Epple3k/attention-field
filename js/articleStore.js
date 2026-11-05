@@ -40,12 +40,16 @@ const CLUSTER_RECOMPUTE_INTERVAL = 1.2; // seconds between topology recomputes
 const FIELD_ENERGY_TAU = 3.5; // seconds — smoothing for the ambient energy readout
 export const COLLAPSE_THRESHOLD = 4; // members at which a cluster merges into one shape
 
-// A new article earns time to be observed. If the field is full, we hold
-// existing young nodes rather than cycling through one-frame appearances.
-// Exiting articles keep their last momentum while fading out separately.
-const MIN_NODE_DWELL_MS = 20000;
-const EXIT_FADE_MS = 2400;
-const MAX_RETIRING_NODES = 36;
+// Not every spark of attention turns into something sustained — most real
+// activity has a lot of one-off glances that never get a second look. A
+// fraction of brand-new nodes get a short, random early-exit timer instead
+// of waiting out the normal mass/heat decay curve, so the field's
+// population doesn't feel like it's on one uniform clock. A second edit
+// before the timer fires cancels it — real, repeated activity always
+// overrides the random flicker.
+const EARLY_EXIT_CHANCE = 0.3;
+const EARLY_EXIT_MIN_MS = 1500;
+const EARLY_EXIT_MAX_MS = 5000;
 
 // Heavily-read pages join the field too, alongside heavily-edited ones —
 // Wikipedia's own daily top-pageviews list (see trendingService.js), not a
@@ -71,7 +75,6 @@ export class ArticleStore {
   constructor() {
     /** @type {Map<string, object>} */
     this.nodes = new Map();
-    this._retiringNodes = []; // visually present for an exit fade, no longer in active topology
     this.rings = [];
     this.links = []; // transient same-editor event ties
     this.topicLinks = []; // persistent shared-category structural ties
@@ -153,9 +156,7 @@ export class ArticleStore {
       const tau = target > node.stability ? PHYSICS.stabilityInTau : PHYSICS.stabilityOutTau;
       node.stability += (target - node.stability) * Math.min(1, dt / tau);
       if (node.stability < 0.001) node.stability = 0;
-      // Active topics have a little more inertia; hovering adds a much larger
-      // temporary mass without introducing a separate attraction force.
-      node.bodyMass = 1 + node.mass * 1.8 + node.stability * PHYSICS.stabilityMass;
+      node.bodyMass = 1 + node.stability * PHYSICS.stabilityMass;
     }
   }
 
@@ -307,21 +308,19 @@ export class ArticleStore {
 
     const gainFactor = gain / 50; // 50 == neutral/unity gain
     let node = this.nodes.get(edit.title);
-    if (!node) {
-      const returning = this._retiringNodes.some((entry) => entry.node.title === edit.title);
-      // Prefer a stable field to briefly showing every one-off edit at capacity.
-      // A returning article can reclaim its place and its previous trajectory.
-      if (this.nodes.size >= MAX_NODES && !this._evictWeakest(returning)) return null;
-      node = this._reviveNode(edit.title);
-    }
     const isNewNode = !node;
-    if (!node) node = this._createNode(edit);
-    if (!this.nodes.has(edit.title)) {
+
+    if (!node) {
+      if (this.nodes.size >= MAX_NODES) this._evictWeakest();
+      node = this._createNode(edit);
       this.nodes.set(edit.title, node);
-      if (!node.categoriesLoaded) this._categoryQueue.add(edit.title);
+      this._categoryQueue.add(edit.title);
     }
 
     node.edits += 1;
+    // a second edit is real, repeated activity — cancel any random
+    // early-exit timer, the same way sustained interest always should
+    if (!isNewNode) node.earlyExitAt = null;
     node.lastActive = now;
     node.lastEditType = edit.type;
     node.url = edit.url;
@@ -390,26 +389,19 @@ export class ArticleStore {
         node.opacity = clamp(0.08 + node.mass * 0.55 + node.heat * 0.55, 0.06, 1);
       }
 
+      const earlyExit = node.earlyExitAt !== null && now >= node.earlyExitAt;
+
       if (
-        !node.isTrending &&
-        !node.pinned &&
-        now - node.createdAt >= MIN_NODE_DWELL_MS &&
-        node.mass < REMOVE_THRESHOLD &&
-        node.heat < REMOVE_THRESHOLD &&
-        node.rangeCount === 0 &&
-        idleSeconds > 8
+        earlyExit ||
+        (!node.isTrending &&
+          node.mass < REMOVE_THRESHOLD &&
+          node.heat < REMOVE_THRESHOLD &&
+          node.rangeCount === 0 &&
+          idleSeconds > 8)
       ) {
-        this._retireNode(node, now);
+        this.nodes.delete(node.title);
       }
     }
-
-    // Smoothstep: the outgoing point is still drawn, but gradually loses
-    // presence rather than vanishing when it leaves the active data set.
-    for (const entry of this._retiringNodes) {
-      const t = clamp((now - entry.startedAt) / EXIT_FADE_MS, 0, 1);
-      entry.node.exitAlpha = 1 - t * t * (3 - 2 * t);
-    }
-    this._retiringNodes = this._retiringNodes.filter((entry) => entry.node.exitAlpha > 0);
 
     for (const ring of this.rings) ring.age += dt;
     this.rings = this.rings.filter((r) => r.age < RING_LIFETIME);
@@ -435,10 +427,7 @@ export class ArticleStore {
     // ---- physics: see physics.js for the force hierarchy this composes ----
     const liveNodes = [...this.nodes.values()];
     const bodies = [...liveNodes, ...this.clusterBodies.values()];
-    // Ghosts inherit their momentum, but no longer participate in
-    // springs, repulsion, or live cluster membership.
-    const movingBodies = [...bodies, ...this._retiringNodes.map((entry) => entry.node)];
-    if (movingBodies.length) {
+    if (bodies.length) {
       applyAssociationSprings(this.topicLinks, dt);
       applyAssociationSprings(this.links, dt);
       applySummaryGravity(this.clusters, this.clusterBodies, dt);
@@ -450,7 +439,7 @@ export class ArticleStore {
         y: (this.bounds.top + this.bounds.bottom) / 2,
       };
       applyCentering(bodies, center, dt);
-      integrate(movingBodies, this.bounds, dt, PHYSICS, this._energyBoost);
+      integrate(bodies, this.bounds, dt, PHYSICS, this._energyBoost);
     }
 
     this._energyBoost *= Math.exp((-Math.LN2 * dt) / PHYSICS.energyBoostHalfLife);
@@ -498,14 +487,11 @@ export class ArticleStore {
         // re-derive every tick, not just on the slower full recompute,
         // so clicking a cluster open/closed registers immediately
         const expanded = this._expandedLabels.has(c.label);
-        const members = c.members.filter((n) => this.nodes.has(n.title));
-        const collapsible = members.length >= COLLAPSE_THRESHOLD;
         return {
           ...c,
-          members,
-          collapsible,
+          members: c.members.filter((n) => this.nodes.has(n.title)),
           expanded,
-          collapsed: collapsible && !expanded,
+          collapsed: c.collapsible && !expanded,
         };
       })
       .filter((c) => c.members.length >= 2);
@@ -545,10 +531,6 @@ export class ArticleStore {
 
   getNodes() {
     return [...this.nodes.values()];
-  }
-
-  getRetiringNodes() {
-    return this._retiringNodes.map((entry) => entry.node);
   }
 
   getRings() {
@@ -719,7 +701,7 @@ export class ArticleStore {
       const trendingMass = TRENDING_MIN_MASS + (1 - TRENDING_MIN_MASS) * (1 - (rank - 1) / Math.max(1, topN));
       let node = this.nodes.get(title);
       if (!node) {
-        if (this.nodes.size >= MAX_NODES && !this._evictWeakest(true)) continue;
+        if (this.nodes.size >= MAX_NODES) this._evictWeakest();
         node = this._createTrendingNode(title, rank, views, trendingMass);
         this.nodes.set(title, node);
         this._categoryQueue.add(title);
@@ -729,6 +711,9 @@ export class ArticleStore {
       node.trendingRank = rank;
       node.trendingViews = views;
       node.trendingMass = trendingMass;
+      // being independently confirmed as heavily-read overrides the random
+      // early-exit flicker, the same way a real second edit does
+      node.earlyExitAt = null;
     }
     for (const node of this.nodes.values()) {
       if (node.isTrending && !stillTrending.has(node.title)) node.isTrending = false;
@@ -745,13 +730,6 @@ export class ArticleStore {
   // draws a named halo for size >= 3 so a coincidental pair doesn't read as
   // "a topic."
   _recomputeClusters() {
-    // Keep birth times across topology refreshes so the same relationship
-    // doesn't repeatedly fade in every 1.2 seconds.
-    const previousLinkBirths = new Map(this.topicLinks.map((l) => [
-      [l.a.title, l.b.title].sort().join("\u0000"), l.bornAt,
-    ]));
-    const previousClusterBirths = new Map(this.clusters.map((c) => [c.label, c.createdAt]));
-    const topologyNow = performance.now();
     const all = [...this.nodes.values()];
     for (const n of all) {
       n.topicDegree = 0;
@@ -797,11 +775,7 @@ export class ArticleStore {
         if (best) {
           // rarer shared category (lower bestScore) => higher raw strength
           const raw = clamp01(1 - (bestScore - 1) / Math.max(1, maxFreq - 1));
-          const pairKey = [a.title, b.title].sort().join("\u0000");
-          links.push({
-            a, b, category: best, strength: mapAssociationStrength(raw),
-            bornAt: previousLinkBirths.get(pairKey) ?? topologyNow,
-          });
+          links.push({ a, b, category: best, strength: mapAssociationStrength(raw) });
           a.topicDegree += 1;
           b.topicDegree += 1;
         }
@@ -860,7 +834,6 @@ export class ArticleStore {
       clusters.push({
         members,
         label: finalLabel,
-        createdAt: previousClusterBirths.get(finalLabel) ?? topologyNow,
         collapsible,
         expanded,
         collapsed: collapsible && !expanded,
@@ -898,8 +871,10 @@ export class ArticleStore {
       group: "OTHER",
       topicDegree: 0,
       clustered: false,
-      createdAt: now, // drives entrance easing and the gradual color desaturation
-      exitAlpha: 1,
+      createdAt: now, // drives the node's color desaturating over its lifetime — see renderer.js
+      // a random chance this one just flickers out shortly, rather than
+      // waiting out the normal decay curve — see EARLY_EXIT_* above
+      earlyExitAt: Math.random() < EARLY_EXIT_CHANCE ? now + rand(EARLY_EXIT_MIN_MS, EARLY_EXIT_MAX_MS) : null,
       lastActive: now,
       lastEditType: edit.type,
       lastUser: edit.user,
@@ -916,8 +891,9 @@ export class ArticleStore {
   // same shape as _createNode's, so it's indistinguishable to every other
   // system (physics, clustering, hover, decay) except the isTrending flag
   // renderer.js reads to draw it as a triangle and the removal exemption
-  // above. Starts at its target trendingMass, but enters visually with
-  // the same quiet fade as every other article.
+  // above. Starts at its target trendingMass immediately rather than easing
+  // in, since it's already a confirmed, current fact about the page, not a
+  // fresh pulse of activity to ramp up from zero.
   _createTrendingNode(title, rank, views, trendingMass) {
     const b = this.bounds;
     const marginX = (b.right - b.left) * 0.16;
@@ -948,7 +924,7 @@ export class ArticleStore {
       topicDegree: 0,
       clustered: false,
       createdAt: now,
-      exitAlpha: 1,
+      earlyExitAt: null, // trending nodes' lifecycle is governed by staying on the top-pageviews list, not the random flicker
       lastActive: now,
       lastEditType: null,
       lastUser: null,
@@ -961,47 +937,13 @@ export class ArticleStore {
     };
   }
 
-  // Retired articles leave the active graph immediately, but remain
-  // visible as non-interactive, decelerating points for the exit transition.
-  _retireNode(node, now = performance.now()) {
-    if (!this.nodes.delete(node.title)) return;
-    node.retiredFromCollapsedCluster = this.clusters.some(
-      (cluster) => cluster.collapsed && cluster.members.includes(node)
-    );
-    node.pinned = false;
-    node.exitAlpha = 1;
-    this._retiringNodes.push({ node, startedAt: now });
-    if (this._retiringNodes.length > MAX_RETIRING_NODES) this._retiringNodes.shift();
-    this._categoryQueue.delete(node.title);
-    if (this._hoveredNode === node) this._hoveredNode = null;
-  }
-
-  _reviveNode(title) {
-    const index = this._retiringNodes.findIndex((entry) => entry.node.title === title);
-    if (index < 0) return null;
-    const [{ node }] = this._retiringNodes.splice(index, 1);
-    node.exitAlpha = 1;
-    node.retiredFromCollapsedCluster = false;
-    return node;
-  }
-
-  // Never evict a freshly entered article just to rotate in another one-off
-  // event. Confirmed trending pages may force space when necessary.
-  _evictWeakest(force = false) {
-    const now = performance.now();
+  _evictWeakest() {
     let weakest = null;
     for (const node of this.nodes.values()) {
-      const age = now - node.createdAt;
-      if (node.pinned || (!force && age < MIN_NODE_DWELL_MS)) continue;
-      const score =
-        node.mass + node.heat + node.rangeCount * 0.05 +
-        node.topicDegree * 0.08 + (node.isTrending ? 3 : 0) +
-        (age < MIN_NODE_DWELL_MS ? 1.5 : 0);
+      const score = node.mass + node.heat + node.rangeCount * 0.05 + node.topicDegree * 0.08;
       if (!weakest || score < weakest.score) weakest = { node, score };
     }
-    if (!weakest) return false;
-    this._retireNode(weakest.node, now);
-    return true;
+    if (weakest) this.nodes.delete(weakest.node.title);
   }
 }
 
